@@ -54,8 +54,25 @@ package imports and computes with both absent.
 
 ## Status
 
-M0 (skeleton) in progress. See `docs/` for the theory pages, which are
-also readable from the CLI:
+**M0 and M1 complete.** 154 tests, three commits. Built: immutable
+phase/frequency containers with a float64 precision guard, provenance with
+a step log, the plugin registry, tau selection, Kasdin-Walter synthesis,
+delimited-text reading, a CLI, the five classical estimators (`adev`,
+`oadev`, `mdev`, `tdev`, `ohdev`), the exact-rational certified-value
+oracle, and the Tier 0 identity suite.
+
+All five estimators agree with exact rational arithmetic to 14.1-16.3
+correct digits. See `docs/stabilis-progress.pdf`.
+
+**Next: M2** — tapered eta1/eta3 degrees of freedom, a pure-numpy inverse
+chi-square (Wilson-Hilferty start then Newton; Wichura AS241 for the normal
+quantile), confidence intervals, noise identification by lag-1 ACF
+cross-checked against the MDEV log-log slope, and `stabilis validate`
+emitting a versioned evidence report. This is the v0.1 release point and
+the first version from which an uncertainty may legitimately be quoted --
+nothing before it should be used to state one.
+
+The theory pages are readable from the CLI:
 
 ```bash
 stabilis docs --list
