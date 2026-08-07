@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stabilis"
+version = "0.0.1.dev0"
+description = "Frequency stability analysis: the Allan variance family, wavelet variance, and confidence intervals that do not require guessing the noise type first."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MPL-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "sougandhkm", email = "sougandhkm@gmail.com" }]
+keywords = [
+    "allan variance",
+    "frequency stability",
+    "metrology",
+    "time and frequency",
+    "wavelet variance",
+    "oscillator",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+# The core is numpy-only on purpose: customers embed this in production test
+# rigs, where a heavy dependency tree is a sales objection. scipy and
+# matplotlib are speed and convenience only -- never correctness.
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.6"]
+fast = ["scipy>=1.10"]
+serial = ["pyserial>=3.5"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+stabilis = "stabilis.cli:main"
+
+[project.urls]
+Source = "https://github.com/sougandhkm/stabilis"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+stabilis = ["theory/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: long-running Monte-Carlo validation (excluded from the default run)",
+]
