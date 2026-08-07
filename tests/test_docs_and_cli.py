@@ -85,6 +85,33 @@ def test_cli_stats_json_carries_provenance(tmp_path, capsys):
     assert any(s["action"] == "read_text" for s in payload["provenance"]["steps"])
 
 
+def test_cli_estimator_reproduces_published_values(tmp_path, capsys):
+    """The CLI path must agree with the library path, on published numbers."""
+    import numpy as np
+
+    from stabilis.reference import nbs14_1000point
+
+    p = tmp_path / "nbs14.txt"
+    np.savetxt(p, nbs14_1000point(1000), fmt="%.15e")
+    assert main(
+        ["oadev", str(p), "--kind", "frequency", "--rate", "1", "--taus", "decade",
+         "--max-af", "100", "--json"]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    by_af = dict(zip(payload["af"], payload["dev"]))
+    assert by_af[1] == pytest.approx(2.922319e-01, rel=1e-6)
+    assert by_af[10] == pytest.approx(9.159953e-02, rel=1e-6)
+    assert by_af[100] == pytest.approx(3.241343e-02, rel=1e-6)
+
+
+def test_cli_estimator_text_table(tmp_path, capsys):
+    p = tmp_path / "d.txt"
+    p.write_text("\n".join(str(float(v)) for v in range(64)) + "\n")
+    assert main(["ohdev", str(p), "--rate", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "OHDEV" in out and "Tau (s)" in out
+
+
 def test_cli_reports_bad_input_without_a_traceback(tmp_path, capsys):
     p = tmp_path / "d.txt"
     p.write_text("1.0\n2.0\n")

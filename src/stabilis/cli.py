@@ -16,6 +16,7 @@ from .docs import list_topics, read_topic, topic_summary
 from .log import configure
 from .preprocess import basic_stats
 from .provenance import to_dict
+from .tau import MODES
 
 __all__ = ["main", "build_parser"]
 
@@ -46,6 +47,22 @@ def build_parser() -> argparse.ArgumentParser:
     _add_input_args(p_stats)
     p_stats.add_argument("--json", action="store_true", help="emit JSON")
     p_stats.set_defaults(func=_cmd_stats)
+
+    from .stats import adev, mdev, oadev, ohdev, tdev
+
+    for name, fn in (
+        ("adev", adev),
+        ("oadev", oadev),
+        ("mdev", mdev),
+        ("tdev", tdev),
+        ("ohdev", ohdev),
+    ):
+        p = sub.add_parser(name, help=fn.__doc__.splitlines()[0])
+        _add_input_args(p)
+        p.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
+        p.add_argument("--max-af", type=int, help="largest averaging factor")
+        p.add_argument("--json", action="store_true", help="emit JSON")
+        p.set_defaults(func=_cmd_estimate, estimator=fn, estimator_name=name)
 
     return parser
 
@@ -130,6 +147,45 @@ def _cmd_stats(args) -> int:
     print(f"mean      {stats['mean']:.9e} {unit}")
     print(f"median    {stats['median']:.9e} {unit}")
     print(f"std       {stats['std']:.9e} {unit}   (descriptive only, see docs gaps)")
+    return 0
+
+
+def _cmd_estimate(args) -> int:
+    """Run one estimator and print the tau table.
+
+    Column layout deliberately mirrors Stable32's, so a user migrating can
+    diff the two outputs directly. Confidence bounds arrive in M2; until
+    then the header says so rather than leaving a suggestive blank.
+    """
+    series = _load(args)
+    result = args.estimator(
+        series, taus=args.taus, max_af=args.max_af, keep_coeffs=False
+    )
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "kind": result.kind,
+                    "af": result.af.tolist(),
+                    "tau_s": result.tau_s.tolist(),
+                    "var": result.var.tolist(),
+                    "dev": result.dev.tolist(),
+                    "n_terms": result.n_terms.tolist(),
+                    "provenance": to_dict(result.provenance),
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return 0
+
+    print(f"# {result.kind.upper()} for {args.path}")
+    print(f"# tau grid: {args.taus}   n = {series.n}   rate = {series.rate_hz:g} Hz")
+    print("# confidence bounds not yet implemented (M2)")
+    print(f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}  {result.kind.upper():>14}")
+    for af, tau, n, dev in zip(result.af, result.tau_s, result.n_terms, result.dev):
+        print(f"{af:>7}  {tau:>13.4e}  {n:>8}  {dev:>14.6e}")
     return 0
 
 

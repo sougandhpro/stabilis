@@ -103,7 +103,13 @@ EXPECTED_NBS14_9POINT = {
     "oadev": {1: 91.22945, 2: 85.95287},
     "mdev": {1: 91.22945, 2: 74.78849},
     "totdev": {1: 91.22945, 2: 93.90379},
-    "hdev": {1: 70.80608, 2: 116.7980},
+    # CORRECTED 2026-08-07. The relayed table gave hdev(1) = 70.80608, which
+    # contradicts its own stated identity hdev == ohdev at AF 1 (there is no
+    # overlap to exploit at m=1, so the two estimators coincide). Our exact
+    # rational oracle certifies 70.806073185850378, i.e. 70.80607 to seven
+    # figures. The relayed value was a transcription error -- exactly the
+    # failure mode flagged in the header note above.
+    "hdev": {1: 70.80607, 2: 116.7980},
     "ohdev": {1: 70.80607, 2: 85.61487},
     "tdev": {1: 52.67135, 2: 86.35831},
 }
