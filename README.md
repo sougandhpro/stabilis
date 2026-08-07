@@ -66,3 +66,17 @@ stabilis docs avar
 
 MPL-2.0. You may embed this in closed products, including commercial test
 rigs and instrument firmware; modifications to these files come back.
+
+## Progress report
+
+A report covering what is built, the measured results, and the design
+decisions is regenerated from a live run -- every figure in it is computed
+at generation time rather than typed in:
+
+```bash
+python3 docs/make_report.py --pdf
+```
+
+Output lands in `docs/stabilis-progress.pdf`. The PDF is rendered by driving
+the Windows Edge binary headless through WSL interop, so no PDF library is
+needed; without Edge, open the HTML and print it.

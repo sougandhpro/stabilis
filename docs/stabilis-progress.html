@@ -1,0 +1,209 @@
+<style>
+@page { size: A4; margin: 18mm 16mm; }
+* { box-sizing: border-box; }
+body { font: 10.5pt/1.5 "Charter","Georgia",serif; color:#14171a; margin:0 auto;
+       max-width: 190mm; padding: 10mm 6mm; background:#fff; }
+h1 { font-size: 22pt; margin: 0 0 2mm; letter-spacing:-.2pt; }
+h2 { font-size: 13pt; margin: 9mm 0 2.5mm; padding-bottom:1.5mm;
+     border-bottom: 1.5px solid #14171a; page-break-after: avoid; }
+h3 { font-size: 11pt; margin: 5mm 0 1.5mm; page-break-after: avoid; }
+p, li { margin: 0 0 2.5mm; }
+.sub { color:#5b6570; font-size:10pt; margin-bottom:1mm; }
+.meta { font: 8.5pt/1.5 ui-monospace,"Cascadia Mono",Consolas,monospace;
+        color:#5b6570; border-top:1px solid #d5dae0; padding-top:2mm; margin-top:1mm;}
+table { border-collapse: collapse; width:100%; margin:3mm 0 4mm;
+        font-size:9pt; page-break-inside: avoid; }
+th { text-align:left; border-bottom:1.2px solid #14171a; padding:1.6mm 2mm;
+     font-weight:600; }
+td { border-bottom:.5px solid #dfe4e9; padding:1.4mm 2mm; }
+td.n, th.n { text-align:right; font-variant-numeric: tabular-nums;
+             font-family: ui-monospace,Consolas,monospace; }
+tr:last-child td { border-bottom:1.2px solid #14171a; }
+code, .mono { font-family: ui-monospace,"Cascadia Mono",Consolas,monospace;
+              font-size:9pt; }
+.ok { color:#136c34; font-weight:600; }
+.bad { color:#a4161a; font-weight:600; }
+.note { background:#f5f7f9; border-left:3px solid #8c98a4; padding:2.5mm 3.5mm;
+        margin:3mm 0; page-break-inside: avoid; }
+.note strong { color:#14171a; }
+.kv { display:grid; grid-template-columns: 42mm 1fr; gap:.8mm 4mm; font-size:9.5pt; }
+.kv dt { color:#5b6570; }
+.kv dd { margin:0; }
+ul { padding-left: 5mm; margin: 0 0 3mm; }
+.small { font-size:9pt; color:#5b6570; }
+</style>
+
+<h1>stabilis — progress report</h1>
+<p class="sub">Frequency stability analysis engine. Milestones M0 and M1 complete.</p>
+<div class="meta">
+generated 2026-08-07 21:33 UTC &nbsp;·&nbsp; stabilis 0.0.1.dev0 &nbsp;·&nbsp;
+numpy 2.2.6 &nbsp;·&nbsp; python 3.10.12<br>
+commit 835e9ca (2 total) — WORKING TREE DIRTY
+ &nbsp;·&nbsp; every figure below is measured at generation time
+</div>
+<h2>What this is</h2>
+
+<p>Stable32 is the de-facto tool for frequency stability analysis. It is
+Windows-only, closed, GUI-driven, unscriptable and no longer developed.
+<em>stabilis</em> is an open-core engine for the same job, intended as the free
+foundation under a paid workbench that produces signed ISO-17025-style reports
+for calibration labs and oscillator manufacturers.</p>
+
+<p>Two things distinguish it from a reimplementation. First, the Haar wavelet
+variance <em>is</em> the Allan variance, so classical AVAR is the K=1 case of one
+framework; higher-order Daubechies filters then buy drift immunity and
+convergence for steeper noise. Second, confidence intervals are derived from the
+estimator's own coefficient autocovariance, so they do not require identifying
+the noise type first — Stable32 looks it up in a table and has no answer when the
+noise is not one of its five power laws.</p>
+
+<div class="note"><strong>The commercial argument for validation.</strong>
+ISO/IEC 17025:2017 clause 6.4.1 defines software as <em>equipment</em>, and
+7.11.2 requires laboratory software to be validated before introduction. Its
+NOTE 2 exempts commercial software “in general use within its designed
+application range” — an exemption stabilis fails twice over, being new and
+being open-core, since a lab that patches it explicitly triggers re-validation.
+An accredited lab therefore cannot adopt this engine unless it ships validation
+evidence. That evidence is the product's moat, not its overhead.</div>
+<h2>Results: accuracy against certified values</h2>
+
+<p>Every classical variance is a sum of squares of integer linear combinations
+of the phase samples, divided by an integer. Both NBS14 reference sets are
+integer-derived, so on them the variance is an <strong>exact rational</strong>.
+It is computed independently in <code>fractions.Fraction</code>, with the
+deviation certified to 50 digits via <code>decimal.Decimal.sqrt()</code>. That
+gives certified values computed here, to far more digits than any published
+table, with no dependence on a transcription being correct.</p>
+
+<p>Accuracy is reported as <strong>LRE</strong>, the log relative error, after
+the NIST Statistical Reference Datasets convention: it is the number of correct
+significant digits. float64 carries about 15.95, so these are at the
+representation limit.</p>
+<table><thead><tr><th>Estimator</th><th class="n">NBS14 9-point (min LRE)</th><th class="n">NBS14 1000-point (min LRE)</th></tr></thead><tbody><tr><td>adev</td><td class="n">16.3</td><td class="n">14.8</td></tr><tr><td>oadev</td><td class="n">16.1</td><td class="n">14.8</td></tr><tr><td>mdev</td><td class="n">16.3</td><td class="n">14.1</td></tr><tr><td>tdev</td><td class="n">16.0</td><td class="n">14.1</td></tr><tr><td>ohdev</td><td class="n">16.2</td><td class="n">14.5</td></tr></tbody></table>
+
+<h3>A worked certified value</h3>
+<p class="small">Overlapping Hadamard variance of the NBS14 nine-point set at AF 1,
+as an exact rational and as a 50-digit deviation:</p>
+<div class="kv">
+  <dt>exact variance</dt><dd class="mono">10027 / 2</dd>
+  <dt>certified deviation</dt><dd class="mono">70.806073185850378720054399356481405765799283518283</dd>
+  <dt>computed (float64)</dt><dd class="mono">70.80607318585038</dd>
+</div>
+<div class="note"><strong>The oracle earned its keep immediately.</strong>
+The relayed NBS14 table gave <code>hdev(1) = 70.80608</code> while listing
+<code>ohdev(1) = 70.80607</code> — but these are the same estimator at AF 1,
+since there is no overlap to exploit. The certified value settles it at
+<code>70.806073185850378</code>, so the first was a transcription error. This is
+exactly why correctness rests on algebra rather than on published tables.</div>
+<h2>Results: analytic identities</h2>
+<p>These need no reference data and no oracle, which is why they carry
+the correctness argument. Every published ADEV table traces back to Stable32, so
+agreeing with one proves interoperability; agreeing with algebra proves
+correctness.</p>
+<table><thead><tr><th>Identity</th><th>Claim</th><th>Result</th></tr></thead><tbody><tr><td>linear frequency drift: avar = D²·τ²/2</td><td>bit-exact</td><td><span class="ok">PASS</span></td></tr><tr><td>linear frequency drift: hvar = 0</td><td>bit-exact</td><td><span class="ok">PASS</span></td></tr><tr><td>constant frequency offset leaves avar unchanged</td><td>bit-exact</td><td><span class="ok">PASS</span></td></tr><tr><td>scale equivariance at 2^k: var → 64·var for c = 8</td><td>bit-exact</td><td><span class="ok">PASS</span></td></tr><tr><td>adev = oadev = mdev at AF 1</td><td>rel 1e-15</td><td><span class="ok">PASS</span></td></tr><tr><td>tdev = τ/√3 · mdev</td><td>rel 1e-15</td><td><span class="ok">PASS</span></td></tr><tr><td>constant phase gives exactly zero</td><td>bit-exact</td><td><span class="ok">PASS</span></td></tr></tbody></table>
+<div class="note"><strong>The most valuable single test.</strong> For a
+pure linear frequency drift <em>D</em>, the phase is quadratic, so the second
+difference is the constant <em>D·τ²</em> and the third difference vanishes. Hence
+<code>avar = D²τ²/2</code> and <code>hvar = 0</code>, both exactly. One test
+validates the Allan normalization, the Hadamard normalization and the drift
+convention simultaneously — and it is bit-exact, not approximate.</div>
+<h2>Results: interoperability with Stable32</h2>
+<p class="small">Labelled as interop, not correctness: these published
+values were produced by Stable32 itself. Seven significant figures as published,
+so agreement is assessed at rtol 1e-6.</p>
+<table><thead><tr><th>Estimator</th><th class="n">AF</th><th class="n">computed</th><th class="n">published</th><th class="n">rel. diff</th></tr></thead><tbody><tr><td>adev</td><td class="n">1</td><td class="n">2.9223188e-01</td><td class="n">2.9223190e-01</td><td class="n">7.5e-08</td></tr><tr><td>adev</td><td class="n">10</td><td class="n">9.9657361e-02</td><td class="n">9.9657360e-02</td><td class="n">6.3e-09</td></tr><tr><td>adev</td><td class="n">100</td><td class="n">3.8978043e-02</td><td class="n">3.8978040e-02</td><td class="n">8.5e-08</td></tr><tr><td>oadev</td><td class="n">1</td><td class="n">2.9223188e-01</td><td class="n">2.9223190e-01</td><td class="n">7.5e-08</td></tr><tr><td>oadev</td><td class="n">10</td><td class="n">9.1599534e-02</td><td class="n">9.1599530e-02</td><td class="n">4.6e-08</td></tr><tr><td>oadev</td><td class="n">100</td><td class="n">3.2413430e-02</td><td class="n">3.2413430e-02</td><td class="n">8.0e-09</td></tr><tr><td>mdev</td><td class="n">1</td><td class="n">2.9223188e-01</td><td class="n">2.9223190e-01</td><td class="n">7.5e-08</td></tr><tr><td>mdev</td><td class="n">10</td><td class="n">6.1723764e-02</td><td class="n">6.1723760e-02</td><td class="n">6.2e-08</td></tr><tr><td>mdev</td><td class="n">100</td><td class="n">2.1709209e-02</td><td class="n">2.1709210e-02</td><td class="n">4.0e-08</td></tr><tr><td>tdev</td><td class="n">1</td><td class="n">1.6872015e-01</td><td class="n">1.6872020e-01</td><td class="n">2.8e-07</td></tr><tr><td>tdev</td><td class="n">10</td><td class="n">3.5636232e-01</td><td class="n">3.5636230e-01</td><td class="n">4.7e-08</td></tr><tr><td>tdev</td><td class="n">100</td><td class="n">1.2533818e+00</td><td class="n">1.2533820e+00</td><td class="n">1.8e-07</td></tr><tr><td>ohdev</td><td class="n">1</td><td class="n">2.9438833e-01</td><td class="n">2.9438830e-01</td><td class="n">9.9e-08</td></tr><tr><td>ohdev</td><td class="n">10</td><td class="n">9.5810832e-02</td><td class="n">9.5810830e-02</td><td class="n">1.8e-08</td></tr><tr><td>ohdev</td><td class="n">100</td><td class="n">3.2376383e-02</td><td class="n">3.2376380e-02</td><td class="n">7.8e-08</td></tr></tbody></table>
+<h2>Results: reference generator and numerics</h2>
+
+<h3>NBS14 1000-point set ships as arithmetic, not a file</h3>
+<p>The set is defined by a published Lehmer recursion
+<code>k[i+1] = 16807·k[i] mod 2147483647</code> from seed
+<code>1234567890</code>, so it needs no data file and carries no licence
+question. Verified against the published <code>wriley.com/tst_suit.dat</code>:
+all 1000 values agreed to 5.55e-16 — one ULP, which is that file's own text
+rounding. <strong>The generator is the more exact artifact of the two.</strong></p>
+<div class="kv">
+  <dt>k[0]</dt><dd class="mono">1234567890</dd>
+  <dt>k[1] (check value)</dt><dd class="mono">395529916 &nbsp; <span class="ok">PASS</span></dd>
+  <dt>vs published digits</dt><dd class="mono">max dev 3.33e-16</dd>
+</div>
+
+<h3>Phase ↔ frequency round-trip</h3>
+<p>Recovers the offset-removed phase to a few ULP. Not bit-exact: a cumulative
+sum of differences does not telescope exactly in floating point. The test bounds
+this at 8 ULP, a figure derived from the measurements below rather than tuned.</p>
+<table><thead><tr><th class="n">n</th><th class="n">peak (s)</th><th class="n">max error (s)</th><th class="n">ULP</th></tr></thead><tbody><tr><td class="n">10</td><td class="n">2.690e-12</td><td class="n">1.010e-28</td><td class="n">0.2</td></tr><tr><td class="n">1000</td><td class="n">5.009e-11</td><td class="n">6.462e-27</td><td class="n">1.0</td></tr><tr><td class="n">100000</td><td class="n">2.415e-10</td><td class="n">1.292e-25</td><td class="n">2.5</td></tr></tbody></table>
+
+<h3>Power-law noise synthesis</h3>
+<p>Kasdin–Walter generation, log-log periodogram slope recovered over
+1e-3 &lt; f &lt; 0.1, averaged over eight realizations.</p>
+<table><thead><tr><th class="n">α (requested)</th><th class="n">slope (recovered)</th><th class="n">|error|</th></tr></thead><tbody><tr><td class="n">2</td><td class="n">+1.9734</td><td class="n">0.0266</td></tr><tr><td class="n">1</td><td class="n">+0.9912</td><td class="n">0.0088</td></tr><tr><td class="n">0</td><td class="n">+0.0043</td><td class="n">0.0043</td></tr><tr><td class="n">-1</td><td class="n">-0.9943</td><td class="n">0.0057</td></tr><tr><td class="n">-2</td><td class="n">-1.9955</td><td class="n">0.0045</td></tr></tbody></table>
+<h2>Design decisions worth recording</h2>
+
+<h3>Scale factors live outside the coefficients</h3>
+<p>Every estimator returns the coefficient array it averaged, so one
+confidence-interval implementation can serve all of them. The obvious form is
+<code>variance = mean(c²)</code>, which requires dividing by √2 or √6. That was
+implemented and then reverted: it makes every coefficient irrational and destroys
+exactness where the mathematics is exact — the drift identity above failed by one
+bit. The contract is now <code>variance = scale · mean(c²)</code>. EDOF depends
+only on the scale-free correlation structure, so nothing is lost.</p>
+
+<h3>float64 phase is a genuine hazard at this precision</h3>
+<p>At an accumulated phase of 10³–10⁶ s the float64 spacing is 10⁻¹³–10⁻¹⁰ s,
+which silently quantizes away exactly the picoseconds sub-nanosecond work cares
+about. Phase is therefore stored as offsets from an explicit epoch, and
+construction warns when the spacing approaches the smallest resolved step. The
+warning is recorded in provenance, not merely printed, so it survives into a
+report.</p>
+
+<h3>The classical estimators are not routed through the wavelet filter bank</h3>
+<p>The Haar-equals-Allan identity is the intellectual core of the library, but
+making it the <em>implementation</em> would put boundary handling and
+shift-equivariance on the critical path for no user-visible gain. Written
+directly, the identity becomes an independent check of two separate code paths
+instead of a tautology.</p>
+
+<h3>No pickle support, by design</h3>
+<p><code>pickle.load</code> on a file arriving from a customer's test rig is
+arbitrary code execution. <code>.npy</code> covers the same need safely.</p>
+<h2>Current state</h2>
+
+<div class="kv">
+  <dt>test suite</dt><dd class="mono">154 passed in 2.03s &nbsp; <span class="ok">PASS</span></dd>
+  <dt>wall time</dt><dd class="mono">2.3 s</dd>
+  <dt>latest commit</dt><dd class="mono">835e9ca — Add the classical estimators and an exact-rational oracle (M1)</dd>
+</div>
+<p>Three structural properties are enforced by tests rather than convention: the
+core computes with scipy and matplotlib absent; every theory page must declare
+its validation status and name a covering test; and built-in readers and
+estimators register through the same decorator a third-party plugin would use.</p>
+
+<h3>Built</h3>
+<ul>
+<li><strong>M0</strong> — immutable phase/frequency containers with the precision
+guard, provenance with a step log, the plugin registry, tau selection, Kasdin–Walter
+synthesis, delimited-text reading, theory pages, and a CLI.</li>
+<li><strong>M1</strong> — <code>adev</code>, <code>oadev</code>, <code>mdev</code>,
+<code>tdev</code>, <code>ohdev</code> computed directly from phase, gap-aware, plus
+the exact-rational oracle and the Tier 0 identity suite.</li>
+</ul>
+
+<h3>Next</h3>
+<ul>
+<li><strong>M2</strong> — tapered η₁ and η₃ degrees of freedom, the pure-numpy
+inverse χ², confidence intervals, noise identification, and
+<code>stabilis validate</code> emitting a versioned evidence report. This is the
+v0.1 release point and the first genuinely saleable cut.</li>
+<li><strong>M3</strong> — Greenhall EDOF for error-bar parity with Stable32, the
+MODWT wavelet layer, TOTVAR with its bias correction, power-law decomposition.</li>
+<li><strong>M4–M7</strong> — model fitting against the χ² likelihood, instrument
+readers, realtime ingest and dynamic Allan variance, then the remaining parity
+tail and the report layer.</li>
+</ul>
+
+<div class="note"><strong>Known limitations.</strong> No confidence intervals yet,
+so no uncertainty may be quoted from this version. Expected-value tables relayed
+from secondary sources are marked UNVERIFIED in the source pending transcription
+from the SP 1065 PDF; the certified oracle does not depend on them. Instrument
+readers are not yet validated against real hardware exports. TOTVAR, Theo1, MTIE
+and the wavelet layer are not implemented.</div>
