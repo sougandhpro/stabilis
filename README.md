@@ -45,17 +45,71 @@ party from a clean checkout, and to be capable of failing.
 ## Install
 
 ```bash
-pip install -e ".[dev,plot]"
+pip install -e ".[dev,plot]"          # working on stabilis itself
+pip install /path/to/stabilis         # using it from another project
 ```
 
 The core needs only numpy. `scipy` and `matplotlib` are optional and are
 never required for a correct answer — there is a test asserting the
 package imports and computes with both absent.
 
+## Using it
+
+Everything normally needed is re-exported from the top level, so consuming
+code never has to know which submodule something lives in. **The names in
+`stabilis.__all__` are the public API** and will not move without a version
+bump; anything reached through a submodule path may.
+
+```python
+from stabilis import load_phase, oadev, confidence, identify
+
+series = load_phase("run.dat", rate_hz=1.0)
+result = oadev(series, taus="octave")
+ci = confidence(result)
+
+print(identify(series).name)                     # 'flicker FM'
+for tau, dev, lo, hi in zip(result.tau_s, result.dev, ci.dev_lo, ci.dev_hi):
+    print(f"{tau:8.3g} s  {dev:.4e}  [{lo:.4e}, {hi:.4e}]")
+```
+
+Every result carries a `Provenance` recording what was done and every
+decision taken on your behalf — the tau grid, the gap policy, the degrees-
+of-freedom estimator actually used, any assumed bandwidth. That is what
+makes a number defensible later.
+
+Two subsystems stay off the top level on purpose. `stabilis.plot` needs
+matplotlib, so importing it here would drag an optional dependency into
+every `import stabilis`. `stabilis.bench` is the measurement-setup model,
+and `stats/` is forbidden to import it — keeping it a separate import keeps
+that independence visible.
+
 ## Status
 
-**M2 complete — this is the v0.1 line, the first version from which an
-uncertainty may legitimately be quoted.** 444 tests.
+**M0–M2 complete, most of M3, and M5's bench model.** 648 tests;
+`stabilis validate` 31/31.
+
+M2 was the v0.1 line — the first version from which an uncertainty may
+legitimately be quoted. Since then:
+
+- **Greenhall EDOF**, so Stable32's `Alpha` / `Min Sigma` / `Max Sigma`
+  columns can be reproduced. Selected explicitly, never by `auto`.
+- **Exact non-negative least squares** (Lawson–Hanson, with a KKT
+  certificate), which two very different features both need.
+- **Amplitude-calibrated synthesis** — `h_alpha` is a settable SI
+  parameter, checked against four closed forms exact at every averaging
+  factor.
+- **Power-law decomposition** — a measured σ(τ) curve back into the five
+  IEEE 1139 noise levels plus drift, stacking Allan and modified rows
+  because the two PM noises do not separate from AVAR alone.
+- **The bench model** — sources, devices, channels. Three-cornered hat,
+  N-cornered hat and instrument noise-floor subtraction become one
+  non-negative solve per τ, and `stabilis bench check` refuses a setup
+  that cannot separate its oscillators, naming the one extra measurement
+  that would fix it, *before any data is collected*.
+- **MTIE and TIE rms**, by binary doubling: 10⁶ points over 18 octave τ in
+  0.15 s, where the naive form is O(N·m) per τ.
+- **Plots** — σ(τ) with asymmetric error bars, power-law slope guides,
+  phase, frequency, and the bench solution.
 
 Built on top of M0/M1: pure-numpy special functions (regularized incomplete
 gamma, Wichura AS241 normal quantile, chi-square inverse), data-driven
@@ -98,10 +152,9 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next: M3** — Greenhall EDOF for Stable32 `Min Sigma` / `Max Sigma`
-parity, the MODWT wavelet family whose acceptance test is bit-agreement
-with M1's AVAR, TOTVAR with its bias correction, and the stacked AVAR+MVAR
-power-law decomposition.
+**Next** — the rest of M3: TOTVAR with its bias correction, Thêo1/ThêoH,
+and the MODWT wavelet family, whose acceptance test is bit-agreement with
+M1's AVAR.
 
 The theory pages are readable from the CLI:
 

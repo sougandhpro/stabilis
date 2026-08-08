@@ -5,6 +5,30 @@ do not require guessing the noise type first.
 
 The core imports numpy and nothing else. scipy and matplotlib are optional
 and are never required for a correct answer.
+
+Everything a caller normally needs is re-exported here, so consuming code
+writes `from stabilis import oadev, confidence` and never has to know which
+submodule something lives in. That is a promise: **the names in `__all__`
+below are the public API** and will not move without a version bump, while
+anything reached through a submodule path may.
+
+Two subsystems are deliberately *not* re-exported, and their absence is the
+documentation:
+
+* `stabilis.bench` -- the measurement setup. Optional, and `stats/` is
+  forbidden to import it, so keeping it off the top level keeps that
+  separation visible.
+* `stabilis.plot` -- needs matplotlib. Importing it here would drag an
+  optional dependency into every `import stabilis`.
+
+    import numpy as np
+    from stabilis import load_phase, oadev, confidence
+
+    series = load_phase("run.dat", rate_hz=1.0)
+    result = oadev(series, taus="octave")
+    ci = confidence(result)
+    for tau, dev, lo, hi in zip(result.tau_s, result.dev, ci.dev_lo, ci.dev_hi):
+        print(f"{tau:8.3g} s  {dev:.4e}  [{lo:.4e}, {hi:.4e}]")
 """
 
 from importlib.metadata import PackageNotFoundError, version
@@ -17,14 +41,60 @@ except PackageNotFoundError:  # running from a source tree, not installed
 # __version__ must be bound before these import, since provenance reads it.
 from .provenance import Provenance, Step, new_provenance  # noqa: E402
 from .types import FreqSeries, PhaseSeries, to_frequency, to_phase  # noqa: E402
+from .io import load_frequency, load_phase  # noqa: E402
+from .preprocess import basic_stats  # noqa: E402
+from .stats import (  # noqa: E402
+    ONE_SIGMA,
+    TWO_SIGMA,
+    Confidence,
+    StabilityResult,
+    adev,
+    confidence,
+    decompose,
+    identify,
+    identify_curve,
+    mdev,
+    mtie,
+    oadev,
+    ohdev,
+    tdev,
+    tierms,
+)
+from .synth import power_law_freq, power_law_phase  # noqa: E402
 
 __all__ = [
     "__version__",
+    # data
     "FreqSeries",
     "PhaseSeries",
+    "to_frequency",
+    "to_phase",
+    "load_phase",
+    "load_frequency",
+    "basic_stats",
+    # estimators
+    "adev",
+    "oadev",
+    "mdev",
+    "tdev",
+    "ohdev",
+    "mtie",
+    "tierms",
+    "StabilityResult",
+    # uncertainty
+    "confidence",
+    "Confidence",
+    "ONE_SIGMA",
+    "TWO_SIGMA",
+    # analysis
+    "decompose",
+    "identify",
+    "identify_curve",
+    # synthesis
+    "power_law_freq",
+    "power_law_phase",
+    # provenance
     "Provenance",
     "Step",
     "new_provenance",
-    "to_frequency",
-    "to_phase",
 ]
