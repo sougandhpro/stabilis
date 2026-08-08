@@ -55,35 +55,12 @@ nothing is copied from it.
 
 ---
 
-## 2. IEEE 1139 amplitude calibration of the synthesizer
+## 2. Power-law conversion coefficients for white and flicker PM
 
 **Status: open. Blocks `powerlaw.py`.**
 
-`synth.power_law_noise` produces the right *slopes* — that is tested — but
-carries **no calibrated `h_alpha`**. Its output has an arbitrary
-amplitude. Consequences:
-
-- the σ(τ) ↔ `h_alpha` conversion coefficients cannot be checked by
-  generating noise of known `h_alpha` and recovering it;
-- `powerlaw.py`'s design matrix therefore has no end-to-end test, only a
-  structural one.
-
-**How it gets discharged.** Calibrate the Kasdin–Walter output against the
-closed forms that need no `f_h` and are already stated in
-`theory/noise-types.md`: white FM `h₀/(2τ)`, flicker FM `2·ln2·h₋₁` (flat
-in τ, a very sensitive joint test of synthesizer and estimator), and
-random-walk FM `2π²h₋₂τ/3`. Then the ensemble mean of σ̂² over many
-realizations pins the scale, and `h_alpha` becomes a settable parameter
-rather than an uncalibrated constant.
-
----
-
-## 3. Power-law conversion coefficients for white and flicker PM
-
-**Status: open. Blocks `powerlaw.py`.**
-
-The σ(τ) ↔ `S_y(f)` conversions for α = 0, −1, −2 are the three closed
-forms above and are `f_h`-free. The two PM rows are not:
+The σ(τ) ↔ `S_y(f)` conversions for α = 0, −1, −2 are `h₀/(2τ)`,
+`2·ln2·h₋₁` and `2π²h₋₂τ/3`, and are `f_h`-free. The two PM rows are not:
 
 - both α = +2 and α = +1 depend on the measurement-system bandwidth `f_h`,
   which **is not identifiable from τ-domain data at all**. It is a
@@ -99,12 +76,16 @@ forms above and are `f_h`-free. The two PM rows are not:
 recalled** — recording the table and page in `references.md` the way the
 Greenhall and Howe–Schlossberger rows already are. Then check the
 transcription two ways that do not depend on it: against the three
-`f_h`-free forms above where they overlap, and against item 2's calibrated
-synthesizer end to end. Until both hold, the coefficients do not ship.
+`f_h`-free forms above where they overlap, and against the calibrated
+synthesizer end to end. The white-PM row has an unusually strong check
+available — the synthesizer's α = +2 output is a brick-wall process at
+*exactly* `f_h = 1/(2τ₀)`, proved in `theory/noise-types.md`, so that
+coefficient can be checked against an `f_h` that is known by construction
+rather than assumed. Until both checks hold, the coefficients do not ship.
 
 ---
 
-## 4. Instrument readers against real hardware exports
+## 3. Instrument readers against real hardware exports
 
 **Status: open, and not yet on the critical path.**
 
@@ -128,4 +109,9 @@ waiting on anything:
 - the χ² confidence-interval path, by measured Monte-Carlo containment,
   published in the validation report;
 - η₁ and η₃, against `2σ⁴/Var(σ̂²)` measured directly;
-- the incomplete gamma and inverse χ², against an exact `Decimal` oracle.
+- the incomplete gamma and inverse χ², against an exact `Decimal` oracle;
+- **the synthesizer's amplitude** — `h_alpha` is a calibrated, settable
+  parameter as of 2026-08-08. Its exact discrete `E[avar]` reproduces the
+  closed forms for white FM, white PM and random-walk FM to 1e-16, and the
+  requested amplitude is recovered end to end through the real estimator to
+  2.3% at 400 realizations. Both are rows in the validation report.

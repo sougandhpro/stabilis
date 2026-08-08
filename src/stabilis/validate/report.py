@@ -52,7 +52,7 @@ from ..stats import ONE_SIGMA, TWO_SIGMA, adev, confidence, mdev, oadev, ohdev, 
 from ..stats.bias import deviation_bias_factor
 from ..stats.edof import eta1
 from ..stats.greenhall import greenhall_edof
-from ..synth import power_law_freq
+from ..synth import _kasdin_walter_impulse, _unit_h_alpha, power_law_freq
 from ..types import FreqSeries, PhaseSeries
 from .certified import (
     certified_deviation,
@@ -272,7 +272,63 @@ def _identities() -> list[Check]:
         f"{c4:.10f}, rel {abs(c4/(np.sqrt(np.pi)/2) - 1):.2e}",
         abs(c4 / (np.sqrt(np.pi) / 2) - 1.0) < 1e-15,
     ))
+    out.append(_synth_amplitude_identity())
     return out
+
+
+def _synth_amplitude_identity() -> Check:
+    """The synthesizer's calibrated amplitude, against exact closed forms.
+
+    `E[avar]` of the generator is computable in closed form without running
+    it, because the series is one linear functional of the driving white
+    noise. Three power laws have exact expressions -- see
+    `theory/noise-types.md` -- and the calibration either reproduces all
+    three or is wrong. This is what lets the power-law decomposition be
+    tested end to end against a *known* h_alpha rather than only
+    structurally.
+    """
+    worst, tau0 = 0.0, 1.0
+    for alpha, want in (
+        # white FM: h0/(2 tau), exact at every m because y is iid.
+        (0.0, lambda m: 1.0 / (2.0 * m * tau0)),
+        # white PM: a brick-wall process at exactly Nyquist.
+        (2.0, lambda m: 3.0 / (8.0 * np.pi**2 * tau0 * (m * tau0) ** 2)),
+        # random-walk FM: the continuum form times an exact 1 + 1/(2m^2).
+        (-2.0, lambda m: 2.0 * np.pi**2 * (m * tau0) / 3.0
+         * (1.0 + 1.0 / (2.0 * m**2))),
+    ):
+        for m in (1, 2, 4, 16):
+            got = _exact_generator_avar(alpha, m) / _unit_h_alpha(alpha, tau0)
+            worst = max(worst, abs(got / want(m) - 1.0))
+    return Check(
+        "identity", "synthesizer amplitude against its exact closed forms",
+        "The generator's E[avar] computed from its impulse response, against "
+        "the closed forms for white FM, white PM and random-walk FM. Fixes "
+        "h_alpha as a calibrated quantity in SI units rather than an "
+        "arbitrary scale -- without this the power-law decomposition has no "
+        "end-to-end test, only a structural one.",
+        "1e-10 relative. All three are exact identities, not asymptotic "
+        "limits: the random-walk form carries its 1/(2 m^2) discrete "
+        "correction explicitly, which is 50% at m = 1.",
+        f"worst deviation {worst:.2e} over three power laws and m = 1..16",
+        worst < 1e-10,
+    )
+
+
+def _exact_generator_avar(alpha: float, m: int, n: int = 1 << 16) -> float:
+    """`E[avar(m*tau0)]` at unit driving variance, from the impulse response.
+
+        ybar2 - ybar1 = sum_j g_j w_j,   g = correlate(a, h),
+        a = [-1/m]*m + [+1/m]*m,         E[avar] = (g @ g)/2
+
+    The trailing `len(a)-1` entries are dropped: their sums run off the end
+    of the truncated `h`, where the true process still has support and `a`
+    summing to zero cancels them. Keeping them doubles the alpha = -2 answer.
+    """
+    h = _kasdin_walter_impulse(n, beta=-alpha)
+    a = np.concatenate((np.full(m, -1.0 / m), np.full(m, 1.0 / m)))
+    g = np.convolve(h, a[::-1])[: -(a.size - 1)]
+    return float(g @ g) / 2.0
 
 
 def _certified() -> list[Check]:
@@ -443,7 +499,46 @@ def _coverage(trials: int) -> list[Check]:
         worst < bound,
     ))
     out += _greenhall_against_truth(ensembles, trials, truth_se)
+    out.append(_h_alpha_round_trip(ensembles, trials))
     return out
+
+
+def _h_alpha_round_trip(ensembles, trials: int) -> Check:
+    """Ask for an h_alpha, generate, estimate, and see what comes back.
+
+    The identity tier proves the calibration formula against exact closed
+    forms. This proves the *path*: the real generator through the real
+    estimator, so a mistake anywhere between the two shows up here. The
+    ensembles are the ones the coverage checks already built, generated at
+    `h_alpha = 1` -- which is not a special case, since the calibration is a
+    single multiplication and `test_synth.py` pins its linearity separately.
+    """
+    worst, tau0 = 0.0, 1.0
+    for alpha, (runs, mean_var) in ensembles.items():
+        first = runs[0]
+        for i, af in enumerate(first.af.tolist()):
+            if af > 512 // 16:
+                continue
+            want = _exact_generator_avar(float(alpha), af) / _unit_h_alpha(alpha, tau0)
+            worst = max(worst, abs(mean_var[i] / want - 1.0))
+    # The ensemble mean of a variance has relative standard error
+    # sqrt(2/(trials*eta)); eta >= 1, so sqrt(2/trials) is the floor and the
+    # band is four of those plus an allowance for the estimator's own spread.
+    se = float(np.sqrt(2.0 / trials))
+    bound = float(np.hypot(0.05, 4.0 * se))
+    return Check(
+        "coverage", "requested h_alpha recovered end to end",
+        "The ensemble mean of sigma_hat^2 against the amplitude that was "
+        "asked for, over white PM, white FM and random-walk FM at N=512. "
+        "Compared against the generator's exact discrete E[avar], not the "
+        "continuum closed form, so the known 1/(2m^2) and Nyquist "
+        "corrections are not charged to the Monte Carlo.",
+        f"within {bound:.0%}, being 5% for the estimator combined in "
+        f"quadrature with four standard errors of an ensemble-mean variance "
+        f"({se:.0%} at {trials} trials), for m up to N/16.",
+        f"worst deviation {worst:.1%} over three power laws",
+        worst < bound,
+    )
 
 
 def _greenhall_against_truth(ensembles, trials: int, truth_se: float) -> list[Check]:
