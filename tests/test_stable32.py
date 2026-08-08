@@ -103,13 +103,17 @@ def _ours(table):
     of curves is recomputed dozens of times and the suite triples in
     length for no extra coverage.
     """
-    key = (table.input_file, table.estimator, int(table.af.max()))
+    key = (table.input_file, table.estimator, tuple(table.af.tolist()))
     if key not in _CACHE:
         series = load_phase(STABLE32_OUTPUTS / "inputs" / table.input_file,
                             rate_hz=table.af[0] / table.tau_s[0])
+        # Stable32's own averaging factors, passed explicitly. Previously
+        # this asked for "all" and sliced, which worked only because that
+        # grid was every integer; now that it thins on long records, the
+        # exact list is both correct and far cheaper.
         _CACHE[key] = get("estimator", table.estimator)(
-            series, taus="all", max_af=key[2])
-    return _CACHE[key].select_afs(table.af)
+            series, taus=table.af)
+    return _CACHE[key]
 
 
 @pytest.mark.skipif(not collected(), reason="no Stable32 exports collected yet")

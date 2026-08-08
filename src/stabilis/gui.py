@@ -117,10 +117,17 @@ def _analyze(root: Path, req: dict) -> dict:
     kwargs = {"taus": req.get("taus", "octave")}
     if req.get("max_af"):
         kwargs["max_af"] = int(req["max_af"])
+    # Coefficient arrays exist only for the confidence interval, and they
+    # cost one array of order n per tau. Asking for them when the bounds
+    # are switched off is how a large record turns into gigabytes for
+    # nothing. MTIE and TIE rms take no such argument.
+    want_ci = bool(req.get("confidence", True))
+    if name not in ("mtie", "tierms"):
+        kwargs["keep_coeffs"] = want_ci
     result = get("estimator", name)(series, **kwargs)
 
     ci = None
-    if req.get("confidence", True) and result.is_variance:
+    if want_ci and result.is_variance:
         ci = confidence(result, level=float(req.get("level", 0.6827)))
 
     ax = plotting.sigma_tau(result, confidence=ci, label=path.name)

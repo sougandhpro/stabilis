@@ -838,7 +838,7 @@ def _stable32_parity() -> list[Check]:
     needed: dict = {}
     for t in tables:
         key = (t.input_file, t.estimator)
-        needed[key] = max(needed.get(key, 0), int(t.af.max()))
+        needed[key] = sorted(set(needed.get(key, [])) | set(t.af.tolist()))
     for t in tables:
         files.add(t.input_file)
         key = (t.input_file, t.estimator)
@@ -846,7 +846,7 @@ def _stable32_parity() -> list[Check]:
             series = load_phase(STABLE32_OUTPUTS / "inputs" / t.input_file,
                                 rate_hz=t.af[0] / t.tau_s[0])
             cache[key] = get("estimator", t.estimator)(
-                series, taus="all", max_af=needed[key])
+                series, taus=needed[key])
         r = cache[key].select_afs(t.af)
 
         # Hadamard of a pure ramp is ~1e-23 against the Allan family's

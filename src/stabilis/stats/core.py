@@ -56,6 +56,14 @@ __all__ = ["Shape", "StabilityResult", "phase_runs", "run_estimator", "GAP_POLIC
 # "auto"    -- "segment" for frequency, "mask" for phase.
 GAP_POLICIES = ("auto", "mask", "segment")
 
+# Ceiling on the coefficient arrays one call may retain. `keep_coeffs` holds
+# an array of order `n` per averaging factor, so the cost is `n_taus * n`
+# and grows as the product -- which is how an innocent-looking "all taus on
+# a long record" turns into tens of gigabytes and a killed process. The
+# grid itself is bounded in `tau.py`; this catches the rest, and says which
+# of the two knobs to turn rather than dying.
+MAX_COEFF_BYTES = 1 << 30
+
 
 @dataclass(frozen=True)
 class Shape:
@@ -235,7 +243,7 @@ def run_estimator(
     scale: float,
     kind: str,
     series: PhaseSeries | FreqSeries,
-    taus: str = "octave",
+    taus="octave",
     max_af: int | None = None,
     hard_limit_divisor: int = 2,
     keep_coeffs: bool = True,
@@ -275,6 +283,17 @@ def run_estimator(
             f"{kind}: no valid averaging factor for n={n} with longest "
             f"gap-free run {longest} (algebraic limit m <= {hard_limit})"
         )
+    if keep_coeffs:
+        want = int(afs.size) * int(n) * 8
+        if want > MAX_COEFF_BYTES:
+            raise MemoryError(
+                f"{kind}: {afs.size} averaging factors over {n} points would "
+                f"retain about {want / 1e9:.1f} GB of coefficient arrays, "
+                f"past the {MAX_COEFF_BYTES / 1e9:.1f} GB limit. They are "
+                "kept only for the confidence interval, so either pass "
+                "keep_coeffs=False if you do not need bounds, or use a "
+                "coarser tau grid -- `tau.suggest(n)` names one."
+            )
 
     var, counts, coeff_list, kept, per_run = [], [], [], [], []
     for m in afs:
@@ -299,7 +318,7 @@ def run_estimator(
         f"stats.{kind}",
         "evaluate",
         {
-            "taus": taus,
+            "taus": taus if isinstance(taus, str) else "explicit",
             "max_af_requested": requested,
             "hard_limit": hard_limit,
             "n": n,
