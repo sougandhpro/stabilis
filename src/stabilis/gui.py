@@ -31,6 +31,7 @@ import json
 import socket
 import threading
 import webbrowser
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -44,6 +45,13 @@ DEFAULT_PORT = 8765
 DATA_SUFFIXES = (".dat", ".txt", ".csv", ".tsv", ".npy", ".phase", ".freq", "")
 
 ESTIMATORS = ("oadev", "adev", "mdev", "tdev", "ohdev", "mtie", "tierms")
+
+# What the numbers in the file are in, and the factor that turns them into
+# what the library wants. Phase is seconds; fractional frequency is
+# dimensionless. Recorded in provenance when it is not 1, because a
+# silently rescaled input is a wrong answer that looks right.
+PHASE_UNITS = {"s": 1.0, "ms": 1e-3, "us": 1e-6, "ns": 1e-9, "ps": 1e-12}
+FREQ_UNITS = {"fractional": 1.0, "ppm": 1e-6, "ppb": 1e-9, "ppt": 1e-15}
 
 
 def _safe(root: Path, candidate: str) -> Path:
@@ -76,7 +84,7 @@ def _listing(root: Path, rel: str) -> dict:
     parent = "" if here == root else str(here.parent.relative_to(root))
     return {"here": "" if here == root else str(here.relative_to(root)),
             "parent": parent, "at_root": here == root,
-            "dirs": dirs, "files": files}
+            "root": str(root), "dirs": dirs, "files": files}
 
 
 def _analyze(root: Path, req: dict) -> dict:
@@ -95,8 +103,13 @@ def _analyze(root: Path, req: dict) -> dict:
 
     path = _safe(root, req["path"])
     rate = float(req["rate"]) if req.get("rate") else None
-    loader = load_phase if req.get("data_kind", "phase") == "phase" else load_frequency
-    series = loader(path, rate_hz=rate)
+    is_phase = req.get("data_kind", "phase") == "phase"
+    loader = load_phase if is_phase else load_frequency
+    time_column = int(req["time_column"]) if req.get("time_column") else None
+    series = loader(path, rate_hz=rate,
+                    column=int(req.get("column") or 0),
+                    time_column=time_column)
+    series = _rescale(series, req.get("unit"), is_phase)
 
     name = req.get("estimator", "oadev")
     if name not in ESTIMATORS:
@@ -142,7 +155,40 @@ def _analyze(root: Path, req: dict) -> dict:
         "kind": result.kind, "n": series.n, "rate_hz": series.rate_hz,
         "rows": rows, "notes": notes,
         "has_ci": ci is not None,
+        "read_as": "phase" if is_phase else "frequency",
+        "unit": req.get("unit") or ("s" if is_phase else "fractional"),
+        "column": int(req.get("column") or 0),
     }
+
+
+def _rescale(series, unit, is_phase: bool):
+    """Convert the file's units into the library's, and say so.
+
+    The library works in seconds of phase and dimensionless fractional
+    frequency. A file in nanoseconds analysed as if it were seconds gives
+    a curve that is wrong by a billion and looks entirely plausible on a
+    log axis, so the conversion is explicit and lands in provenance rather
+    than being folded silently into the numbers.
+    """
+    from .log import record
+
+    table = PHASE_UNITS if is_phase else FREQ_UNITS
+    if not unit or unit not in table:
+        if unit:
+            raise ValueError(
+                f"unknown unit {unit!r} for "
+                f"{'phase' if is_phase else 'frequency'} data; "
+                f"expected one of {sorted(table)}")
+        return series
+    factor = table[unit]
+    if factor == 1.0:
+        return series
+    values = (series.x if is_phase else series.y) * factor
+    prov = record(series.provenance, "gui", "unit_conversion",
+                  {"unit": unit, "factor": factor},
+                  "seconds" if is_phase else "fractional frequency")
+    return (replace(series, x=values, provenance=prov) if is_phase
+            else replace(series, y=values, provenance=prov))
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -156,10 +202,16 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         # This page is served to one local browser and loads nothing
-        # remote, so the strictest policy that still works is the right one.
+        # remote, so the strictest policy that still *works* is right --
+        # and `connect-src 'self'` is load-bearing, not decoration. Without
+        # it `default-src 'none'` blocks the page's own fetch() calls and
+        # the file browser silently renders empty, which is exactly what
+        # happened. Tested through a real browser now, because urllib
+        # never sees a CSP.
         self.send_header("Content-Security-Policy",
                          "default-src 'none'; img-src data:; "
-                         "style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+                         "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                         "connect-src 'self'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -250,7 +302,12 @@ def _free_port(preferred: int) -> int:
             return 0
 
 
-PAGE = """<!doctype html>
+# Raw, deliberately: this is JavaScript, and a `\n` written for JS must
+# reach the browser as two characters. In a plain string Python turns it
+# into a real newline, which lands inside a JS string literal and takes the
+# whole script down with it -- the estimator list and the file browser both
+# render empty and nothing says why.
+PAGE = r"""<!doctype html>
 <html><head><meta charset="utf-8"><title>stabilis</title><style>
 :root { color-scheme: light dark; }
 body { font: 14px/1.5 system-ui, sans-serif; margin: 0; display: flex;
@@ -273,6 +330,10 @@ button { margin-top: 14px; padding: 9px; cursor: pointer; font-weight: 600; }
 #files div:hover { background: rgba(128,128,128,.18); }
 #files div.sel { background: rgba(90,140,255,.35); font-weight: 600; }
 .dir { opacity: .8; }
+.tiny { font-size: 11px; margin: 4px 0 0; word-break: break-all; }
+button.inline { width: auto; margin-top: 0; padding: 6px 14px; flex: none; }
+#files .empty { opacity: .55; cursor: default; font-style: italic; }
+#files .empty:hover { background: none; }
 img { max-width: 100%; border-radius: 4px; }
 table { border-collapse: collapse; font-size: 12px; margin-top: 14px; }
 th, td { padding: 3px 10px 3px 0; text-align: right; white-space: nowrap; }
@@ -285,13 +346,27 @@ td.via { text-align: left; opacity: .7; }
 </style></head><body>
 <div id="side">
   <h1>stabilis</h1>
-  <label>folder <span id="where" class="muted"></span></label>
+  <label>folder</label>
+  <div class="row">
+    <input id="dirpath" placeholder="type a subfolder, or blank for root">
+    <button id="godir" class="inline">Go</button>
+  </div>
+  <div id="root" class="muted tiny"></div>
+  <div id="hint" class="muted tiny"></div>
   <div id="files"></div>
   <div class="row">
     <div><label>read as</label>
       <select id="data_kind"><option value="phase">phase</option>
       <option value="frequency">frequency</option></select></div>
+    <div><label>units in file</label><select id="unit"></select></div>
+  </div>
+  <div class="row">
+    <div><label>data column</label><input id="column" value="0"></div>
+    <div><label>time column</label><input id="time_column" placeholder="none"></div>
+  </div>
+  <div class="row">
     <div><label>rate (Hz)</label><input id="rate" value="1.0"></div>
+    <div><label>max avg factor</label><input id="max_af" placeholder="auto"></div>
   </div>
   <div class="row">
     <div><label>estimator</label><select id="estimator"></select></div>
@@ -299,8 +374,6 @@ td.via { text-align: left; opacity: .7; }
       <option>octave</option><option>decade</option><option>all</option>
       </select></div>
   </div>
-  <label>max averaging factor (blank = auto)</label>
-  <input id="max_af" placeholder="auto">
   <div class="chk"><input type="checkbox" id="confidence" checked>
     <label for="confidence" style="margin:0">error bars</label></div>
   <div class="chk"><input type="checkbox" id="slopes">
@@ -316,11 +389,30 @@ for (const e of %ESTIMATORS%) {
   const o = document.createElement("option"); o.textContent = e;
   $("estimator").appendChild(o);
 }
+const UNITS = %UNITS%;
+function fillUnits() {
+  const kind = $("data_kind").value;
+  const list = UNITS[kind];
+  $("unit").innerHTML = "";
+  for (const u of list) {
+    const o = document.createElement("option"); o.textContent = u;
+    $("unit").appendChild(o);
+  }
+}
+$("data_kind").onchange = fillUnits;
+fillUnits();
 async function browse(d) {
-  const r = await fetch("/api/files?dir=" + encodeURIComponent(d));
-  const j = await r.json();
+  $("err").textContent = "";
+  let j;
+  try {
+    const r = await fetch("/api/files?dir=" + encodeURIComponent(d));
+    j = await r.json();
+  } catch (e) { $("err").textContent = "cannot reach the server: " + e; return; }
   if (j.error) { $("err").textContent = j.error; return; }
-  dir = j.here; $("where").textContent = j.here ? "/" + j.here : "(root)";
+  dir = j.here;
+  $("dirpath").value = j.here;
+  $("root").textContent = "root: " + j.root + (j.here ? "  /  " + j.here : "");
+  $("hint").textContent = "start stabilis gui --root DIR to browse elsewhere";
   const box = $("files"); box.innerHTML = "";
   if (!j.at_root) add("../", () => browse(j.parent), true);
   for (const d2 of j.dirs) add(d2 + "/", () => browse(dir ? dir+"/"+d2 : d2), true);
@@ -328,7 +420,17 @@ async function browse(d) {
       ev => { picked = dir ? dir + "/" + f.name : f.name;
               [...box.children].forEach(c => c.classList.remove("sel"));
               ev.target.classList.add("sel"); }, false);
+  if (!j.dirs.length && !j.files.length) {
+    const el = document.createElement("div");
+    el.className = "empty";
+    el.textContent = "no folders or data files here";
+    box.appendChild(el);
+  }
 }
+$("godir").onclick = () => browse($("dirpath").value.trim());
+$("dirpath").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); browse($("dirpath").value.trim()); }
+});
 function add(text, fn, isDir) {
   const el = document.createElement("div");
   el.textContent = text; if (isDir) el.className = "dir";
@@ -343,6 +445,8 @@ $("go").onclick = async () => {
   const body = { path: picked, data_kind: $("data_kind").value,
     rate: $("rate").value, estimator: $("estimator").value,
     taus: $("taus").value, max_af: $("max_af").value,
+    column: $("column").value, time_column: $("time_column").value,
+    unit: $("unit").value,
     confidence: $("confidence").checked, slopes: $("slopes").checked };
   try {
     const r = await fetch("/api/analyze", { method: "POST",
@@ -358,7 +462,8 @@ function render(j) {
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   let h = '<img src="data:image/png;base64,' + j.png + '">';
   h += '<p class="note">' + e(j.kind) + ' · ' + j.n + ' points · '
-     + j.rate_hz + ' Hz</p>';
+     + j.rate_hz + ' Hz · read as ' + e(j.read_as) + ' in ' + e(j.unit)
+     + ', column ' + j.column + '</p>';
   for (const n of j.notes) h += '<p class="note">' + e(n) + '</p>';
   h += "<table><tr><th>AF</th><th>tau (s)</th><th>#</th><th>" + e(j.kind)
      + "</th>" + (j.has_ci ? "<th>lo</th><th>hi</th><th>EDOF</th><th>via</th>" : "")
@@ -378,3 +483,5 @@ browse("");
 """
 
 PAGE = PAGE.replace("%ESTIMATORS%", json.dumps(list(ESTIMATORS)))
+PAGE = PAGE.replace("%UNITS%", json.dumps(
+    {"phase": list(PHASE_UNITS), "frequency": list(FREQ_UNITS)}))

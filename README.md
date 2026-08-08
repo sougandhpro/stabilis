@@ -163,9 +163,16 @@ stabilis gui                     # opens http://127.0.0.1:8765
 stabilis gui --root ~/data       # confine the file browser to one tree
 ```
 
-A small local page: pick a file, choose an estimator and a tau grid, get
-the curve and the numbers behind it. It computes nothing itself — it calls
-the same library functions the CLI does, so the two cannot disagree.
+A small local page: browse to a file, say which column holds the data and
+what units it is in, choose an estimator and a tau grid, and get the curve
+with the numbers behind it. It computes nothing itself — it calls the same
+library functions the CLI does, so the two cannot disagree.
+
+Units matter and are not guessed: the library works in seconds of phase and
+dimensionless fractional frequency, so a file in nanoseconds is converted
+explicitly and the conversion is recorded in provenance. A `ns` file
+analysed as `s` is wrong by a factor of a billion and looks entirely
+plausible on a log axis.
 
 It uses `http.server` from the standard library and your existing browser,
 so nothing new is installed, and it **binds to 127.0.0.1 only** — the page

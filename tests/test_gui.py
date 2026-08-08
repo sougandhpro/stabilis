@@ -173,3 +173,120 @@ def test_serve_reports_a_busy_port_rather_than_crashing(tmp_path):
             serve(port=port, root=tmp_path, open_browser=False)
     finally:
         httpd.server_close()
+
+
+# ---------------------------------------------------------------------------
+# The page as a browser sees it -- where two real bugs got through
+# ---------------------------------------------------------------------------
+
+
+def test_the_csp_permits_the_pages_own_fetch_calls(server):
+    """`connect-src 'self'` is load-bearing, not decoration.
+
+    Without it, `default-src 'none'` blocks every fetch the page makes and
+    the file browser renders empty with nothing saying why. The API tests
+    above use urllib, which never sees a CSP, so only this catches it.
+    """
+    with urllib.request.urlopen(server + "/") as r:
+        csp = r.headers["Content-Security-Policy"]
+    assert "connect-src 'self'" in csp
+    assert "default-src 'none'" in csp
+
+
+def test_the_page_has_no_real_newline_inside_a_javascript_string():
+    """The JS lives in a Python string, and `\\n` written for JS is a trap.
+
+    In a non-raw string Python turns it into an actual newline, which lands
+    inside a JS string literal and takes the *whole script* down -- the
+    file browser and the estimator list both render empty. `PAGE` is a raw
+    string now; this guards it staying one.
+    """
+    from stabilis.gui import PAGE
+
+    for lineno, line in enumerate(PAGE.splitlines(), 1):
+        # Ignore HTML lines; only the script body matters, and an odd
+        # number of quotes there means a literal spans a newline.
+        if "<" in line or "//" in line:
+            continue
+        assert line.count('"') % 2 == 0, f"unbalanced quote at page line {lineno}"
+
+
+def test_the_page_offers_column_and_unit_controls(server):
+    """Asked for directly: pick which column, and say what units it is in."""
+    with urllib.request.urlopen(server + "/") as r:
+        page = r.read().decode()
+    for element in ('id="column"', 'id="time_column"', 'id="unit"',
+                    'id="dirpath"', 'id="godir"'):
+        assert element in page, element
+    assert '"ns"' in page and '"ps"' in page
+
+
+# ---------------------------------------------------------------------------
+# Columns and units
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def three_column(tmp_path):
+    """time, a junk column, then phase -- the shape real exports come in."""
+    x = np.cumsum(np.random.default_rng(1).standard_normal(2000)) * 1e-3
+    t = np.arange(2000, dtype=float)
+    np.savetxt(tmp_path / "three.dat",
+               np.column_stack([t, np.full_like(x, 7.0), x]), fmt="%.9f")
+    return tmp_path
+
+
+def test_the_chosen_column_is_the_one_analysed(three_column, server):
+    _Handler.root = three_column.resolve()
+    status, body = post(server, "/api/analyze", {
+        "path": "three.dat", "data_kind": "phase", "column": "2",
+        "time_column": "0", "unit": "s", "taus": "decade"})
+    assert status == 200, body
+    assert body["column"] == 2
+    assert body["rate_hz"] == 1.0, "rate inferred from the time column"
+
+    # Column 1 is a constant, so its ADEV is zero -- proof the selector
+    # actually selects rather than defaulting to column 0.
+    status, flat = post(server, "/api/analyze", {
+        "path": "three.dat", "column": "1", "time_column": "0",
+        "unit": "s", "taus": "decade"})
+    assert status == 200, flat
+    assert flat["rows"][0]["dev"] == 0.0
+
+
+@pytest.mark.parametrize("unit,factor", [("s", 1.0), ("ns", 1e-9), ("ps", 1e-12)])
+def test_units_scale_the_answer_exactly(three_column, server, unit, factor):
+    """A file in ns analysed as s is wrong by a billion and looks plausible."""
+    _Handler.root = three_column.resolve()
+    base = post(server, "/api/analyze", {
+        "path": "three.dat", "column": "2", "time_column": "0",
+        "unit": "s", "taus": "decade"})[1]["rows"][0]["dev"]
+    got = post(server, "/api/analyze", {
+        "path": "three.dat", "column": "2", "time_column": "0",
+        "unit": unit, "taus": "decade"})[1]["rows"][0]["dev"]
+    assert got == pytest.approx(base * factor, rel=1e-12)
+
+
+def test_an_unknown_unit_is_refused_with_the_valid_list(three_column, server):
+    _Handler.root = three_column.resolve()
+    status, body = post(server, "/api/analyze", {
+        "path": "three.dat", "column": "2", "unit": "furlongs", "rate": "1.0"})
+    assert status == 400
+    assert "furlongs" in body["error"] and "'ns'" in body["error"]
+
+
+def test_a_unit_conversion_is_recorded_rather_than_folded_in_silently(tmp_path):
+    """A rescaled input must be visible in provenance, not just in the number."""
+    from stabilis.gui import _rescale
+    from stabilis.types import PhaseSeries
+
+    series = PhaseSeries(np.arange(10.0), rate_hz=1.0)
+    scaled = _rescale(series, "ns", is_phase=True)
+    assert scaled.x[1] == pytest.approx(1e-9)
+    actions = [s.action for s in scaled.provenance.steps]
+    assert "unit_conversion" in actions
+
+    # A no-op conversion adds no step, so the log stays honest about what
+    # actually happened.
+    same = _rescale(series, "s", is_phase=True)
+    assert "unit_conversion" not in [s.action for s in same.provenance.steps]
