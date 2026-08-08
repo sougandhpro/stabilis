@@ -55,33 +55,36 @@ nothing is copied from it.
 
 ---
 
-## 2. Power-law conversion coefficients for white and flicker PM
+## 2. The unmodified flicker-PM coefficient, end to end
 
-**Status: open. Blocks `powerlaw.py`.**
+**Status: partial, and it is the one row that cannot be closed the usual
+way. Does not block anything.**
 
-The σ(τ) ↔ `S_y(f)` conversions for α = 0, −1, −2 are `h₀/(2τ)`,
-`2·ln2·h₋₁` and `2π²h₋₂τ/3`, and are `f_h`-free. The two PM rows are not:
+The ten power-law conversion coefficients shipped in `powerlaw_coeffs.py`
+are validated against the integrals they descend from and against the
+shipped estimators — see `theory/powerlaw.md`. **Nine of the ten are
+checked end to end** against synthetic noise of known `h_alpha`.
 
-- both α = +2 and α = +1 depend on the measurement-system bandwidth `f_h`,
-  which **is not identifiable from τ-domain data at all**. It is a
-  required, recorded input; when defaulted it must set `assumed_fh=True`
-  and propagate that flag into every report and plot legend, and rows
-  violating `2π f_h τ ≥ 10` must be dropped;
-- the modified-Allan coefficients for the same power laws are what break
-  the white-PM / flicker-PM degeneracy, which is why the decomposition
-  stacks AVAR and MVAR rows rather than fitting AVAR alone.
+The tenth, unmodified flicker PM, is not, and the reason is structural
+rather than a missing piece of work: its coefficient assumes a brick-wall
+`f_h`, and the Kasdin–Walter flicker-PM process is not brick-wall limited —
+its spectrum rises to Nyquist and stops. Measured, its constant is **1.764**
+where the brick-wall model gives 1.038, an effective `f_h` about 27 % above
+Nyquist. Nothing is wrong; the generator and the formula describe different
+processes.
 
-**How it gets discharged.** Transcribe from NIST SP 1065 (Riley,
-*Handbook of Frequency Stability Analysis*) — **fetched and read, not
-recalled** — recording the table and page in `references.md` the way the
-Greenhall and Howe–Schlossberger rows already are. Then check the
-transcription two ways that do not depend on it: against the three
-`f_h`-free forms above where they overlap, and against the calibrated
-synthesizer end to end. The white-PM row has an unusually strong check
-available — the synthesizer's α = +2 output is a brick-wall process at
-*exactly* `f_h = 1/(2τ₀)`, proved in `theory/noise-types.md`, so that
-coefficient can be checked against an `f_h` that is known by construction
-rather than assumed. Until both checks hold, the coefficients do not ship.
+**Why this is bounded rather than alarming.** The white-PM row *is* checked
+end to end, to 1e-14, because that process is brick-wall at exactly
+`f_h = 1/(2τ₀)`. The *modified* flicker-PM row is also checked, because it
+carries no `f_h` at all. So the gap sits exactly where theory says it must
+and nowhere else, which is itself evidence that the rest is right.
+
+**How it gets discharged.** Either a synthesizer with a genuine brick-wall
+filter at a chosen `f_h` — a band-limited generator, which is a real piece
+of work and belongs with M8's PSD module — or a real instrument export
+whose bandwidth is documented. Until then the flicker-PM `h₁` returned by
+the decomposition carries a wider uncertainty than the other four, and the
+report says so.
 
 ---
 
@@ -110,6 +113,10 @@ waiting on anything:
   published in the validation report;
 - η₁ and η₃, against `2σ⁴/Var(σ̂²)` measured directly;
 - the incomplete gamma and inverse χ², against an exact `Decimal` oracle;
+- **the power-law conversion coefficients**, all ten of them, against the
+  SP 1065 integrals they descend from and against the shipped `oadev` and
+  `mdev` over 300 realizations. The one row with a residual gap is item 2
+  above, and it is bounded and explained rather than open;
 - **the synthesizer's amplitude** — `h_alpha` is a calibrated, settable
   parameter as of 2026-08-08. Its exact discrete `E[avar]` reproduces the
   closed forms for white FM, white PM and random-walk FM to 1e-16, and the

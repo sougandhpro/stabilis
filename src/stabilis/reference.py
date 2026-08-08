@@ -84,20 +84,26 @@ def nbs14_1000point_integers(n: int = 1000) -> list[int]:
 # Seven significant figures as published, so assert at rtol=1e-6, no tighter.
 # Consumed by the M1 estimator tests and by the validation report.
 #
-# !! UNVERIFIED TRANSCRIPTION -- DO NOT TRUST UNTIL CHECKED !!
-# These were relayed from a secondary source, not read off the original
-# NIST SP 1065 Tables 29/30/31. A separate automated extraction of the same
-# tables was reported to have dropped minus signs and mangled exponents,
-# which is precisely the failure mode that matters here: a wrong "certified
-# value" is worse than no certified value, because it makes a correct
-# implementation look broken and can be "fixed" into a wrong one.
+# TRANSCRIBED FROM THE PRIMARY SOURCE, 2026-08-08.
+# NIST SP 1065 (Riley), Table 30 (p. 107) for the 9-point set and Table 31
+# (p. 108) for the 1000-point set, read from the digital original at
+# tf.nist.gov/general/pdf/2220.pdf -- the copy with a real text layer, not
+# the OCR'd scan at nvlpubs, which renders "1.00000e+00" as "l.OOOOOe+00"
+# and cannot be trusted for digits.
 #
-# Before any of this is used as a pass criterion:
-#   1. transcribe from the SP 1065 PDF directly,
-#   2. cross-check against a Stable32 run we perform ourselves,
-#   3. reconcile the internal identities that must hold exactly --
-#      adev == oadev == mdev == totdev at AF 1, and hdev == ohdev at AF 1.
-# Step 3 is free and catches most transcription slips on its own.
+# The values previously here were relayed from a secondary source and had
+# two errors, both now corrected *toward what the handbook prints*:
+#   - 9-point hdev(1): relayed 70.80608, printed 70.80607. The oracle had
+#     already flagged this one (see the note at the end of this file);
+#     the primary source agrees with the oracle, so the disagreement was an
+#     artifact of the relay and not of the handbook.
+#   - 1000-point hdev(100): relayed 3.910860e-02, printed 3.910861e-02.
+#
+# Still Stable32-produced, so still INTEROP assertions only. Seven
+# significant figures as published, so assert at rtol=1e-6, no tighter.
+# The internal identities hold in the printed tables and are worth
+# re-checking after any edit here: adev == oadev == mdev == totdev at AF 1,
+# and hdev == ohdev at AF 1.
 
 EXPECTED_NBS14_9POINT = {
     # estimator: {averaging_factor: deviation}
@@ -105,9 +111,7 @@ EXPECTED_NBS14_9POINT = {
     "oadev": {1: 91.22945, 2: 85.95287},
     "mdev": {1: 91.22945, 2: 74.78849},
     "totdev": {1: 91.22945, 2: 93.90379},
-    # hdev(1) is 70.80608 as relayed. See KNOWN_DISCREPANCIES -- it is left
-    # exactly as the source gives it, not silently corrected.
-    "hdev": {1: 70.80608, 2: 116.7980},
+    "hdev": {1: 70.80607, 2: 116.7980},
     "ohdev": {1: 70.80607, 2: 85.61487},
     "tdev": {1: 52.67135, 2: 86.35831},
 }
@@ -134,28 +138,29 @@ INTEROP_RTOL = 1e-6
 # real conflict and is asserted to be absent.
 #
 # (estimator, af): (published, certified, note)
-KNOWN_DISCREPANCIES = {
-    ("hdev", 1): (
-        70.80608,
-        70.806073185850378,
-        "The relayed table is internally inconsistent: it lists "
-        "ohdev(1) = 70.80607 for the same quantity, since at m=1 there is no "
-        "overlap to exploit and the two estimators coincide. Exact rational "
-        "arithmetic over the nine integers certifies 70.806073185850378, so "
-        "the hdev entry is one unit high in its seventh figure -- a relative "
-        "difference of ~1e-9, comfortably inside INTEROP_RTOL, so nothing "
-        "fails and nothing needs correcting. Recorded because it marks the "
-        "entry to scrutinise when NIST SP 1065 Table 29 is transcribed "
-        "directly; the current source is secondary.",
-    ),
-}
+#
+# Empty as of 2026-08-08, and the way it emptied is worth keeping.
+#
+# The one entry here was 9-point hdev(1) = 70.80608, which disagreed with
+# the oracle's 70.806073185850378 in the seventh figure. It was recorded
+# rather than corrected, exactly as the rule requires. When SP 1065 Table 30
+# was finally read directly it turned out to print **70.80607** -- so the
+# handbook and the oracle had agreed all along and the disagreement belonged
+# to the intermediate source.
+#
+# That is the case *for* the rule, not against it. Had the entry been
+# quietly rewritten to match our own output when it was first noticed, the
+# agreement found later would have proved nothing, because it would have
+# been an agreement we had manufactured. Leaving it alone kept the question
+# open until primary evidence could close it.
+KNOWN_DISCREPANCIES = {}
 
 EXPECTED_NBS14_1000POINT = {
     "adev": {1: 2.922319e-01, 10: 9.965736e-02, 100: 3.897804e-02},
     "oadev": {1: 2.922319e-01, 10: 9.159953e-02, 100: 3.241343e-02},
     "mdev": {1: 2.922319e-01, 10: 6.172376e-02, 100: 2.170921e-02},
     "totdev": {1: 2.922319e-01, 10: 9.134743e-02, 100: 3.406530e-02},
-    "hdev": {1: 2.943883e-01, 10: 1.052754e-01, 100: 3.910860e-02},
+    "hdev": {1: 2.943883e-01, 10: 1.052754e-01, 100: 3.910861e-02},
     "ohdev": {1: 2.943883e-01, 10: 9.581083e-02, 100: 3.237638e-02},
     "tdev": {1: 1.687202e-01, 10: 3.563623e-01, 100: 1.253382e00},
 }
