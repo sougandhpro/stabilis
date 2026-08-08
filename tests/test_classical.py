@@ -185,3 +185,43 @@ def test_oracle_is_independent_of_the_production_path():
                 names.update(f"{node.module or ''}.{a.name}" for a in node.names)
         offenders = [n for n in names if "validate" in n or "certified" in n]
         assert not offenders, f"{module.__name__} imports the oracle: {offenders}"
+
+
+def test_select_afs_keeps_every_per_tau_array_aligned():
+    """`select_afs` restricts a result to someone else's tau list.
+
+    The trap it exists to close: `run_terms` is indexed by *averaging
+    factor*, not by run, though it reads like the latter -- one array per
+    af, each holding that af's surviving term count in each contiguous run.
+    Slicing it the other way yields a shorter tuple of plausible-looking
+    wrong numbers, and the model-based EDOF would then be pooled over the
+    wrong counts without anything looking broken.
+    """
+    rng = np.random.default_rng(3)
+    fs = FreqSeries(rng.standard_normal(600), rate_hz=1.0)
+    full = oadev(fs, taus="all", max_af=16)
+
+    want = [2, 8, 16]
+    sub = full.select_afs(want)
+    assert sub.af.tolist() == want
+    for k, af in enumerate(want):
+        i = int(np.flatnonzero(full.af == af)[0])
+        assert sub.var[k] == full.var[i]
+        assert sub.tau_s[k] == full.tau_s[i]
+        assert sub.n_terms[k] == full.n_terms[i]
+        assert np.array_equal(sub.coeffs[k], full.coeffs[i])
+        # One entry per selected af, each still spanning the runs.
+        assert np.array_equal(sub.run_terms[k], full.run_terms[i])
+    assert len(sub.run_terms) == len(want)
+    assert sub.run_lengths == full.run_lengths
+
+    # Order is the caller's, not the result's.
+    assert full.select_afs([16, 2]).af.tolist() == [16, 2]
+
+
+def test_select_afs_refuses_an_averaging_factor_it_does_not_have():
+    """Silently dropping a requested tau would misalign the comparison."""
+    fs = FreqSeries(np.random.default_rng(1).standard_normal(200), rate_hz=1.0)
+    r = oadev(fs, taus="octave")
+    with pytest.raises(KeyError, match="not in this result"):
+        r.select_afs([1, 3])

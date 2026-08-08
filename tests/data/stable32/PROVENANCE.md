@@ -14,11 +14,11 @@ See `README.md` in this directory for the run sheet.
 
 | field | value |
 |---|---|
-| Stable32 version (from `Help → About`, verbatim) | |
-| Executable SHA-256 | |
-| Where the executable came from (URL or media) | |
-| Operating system and version | |
-| Date of session (ISO 8601) | |
+| Stable32 version (from `Help → About`, verbatim) | 1.62 |
+| Executable SHA-256 | c916c31536e78f1d24d4b7f1e04c379837c6963c |
+| Where the executable came from (URL or media) | IEEE website |
+| Operating system and version | Windows 11 |
+| Date of session (ISO 8601) | 08-08-2026 |
 | Operator | |
 
 ## Global settings
@@ -33,7 +33,7 @@ say "default", with the default's value if it is visible.
 | Bias correction on/off | |
 | Drift removal on/off | |
 | Outlier/deletion settings | |
-| Anything else changed from a fresh install | |
+| Anything else changed from a fresh install | No |
 
 ## Runs
 

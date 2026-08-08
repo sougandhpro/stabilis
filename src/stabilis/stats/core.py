@@ -30,7 +30,7 @@ nothing and buys a bit-exact drift identity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -123,6 +123,41 @@ class StabilityResult:
     def dev_at(self, af: int) -> float:
         """Deviation at one averaging factor."""
         return float(np.sqrt(self.at(af)))
+
+    def select_afs(self, afs) -> "StabilityResult":
+        """This result restricted to `afs`, in the order given.
+
+        For comparing against someone else's tau list -- an instrument
+        export, or Stable32's own columns -- without recomputing, and for
+        keeping the downstream cost proportional to the rows actually
+        wanted rather than to the grid they were selected from.
+
+        **`run_terms` is indexed by averaging factor, not by run**, despite
+        reading like the latter: it is one array per af, each holding that
+        af's surviving term count in each contiguous run. Slicing it the
+        other way silently produces a shorter tuple of wrong numbers, which
+        is the sort of thing that survives review, so it is done here once
+        and nowhere else.
+        """
+        want = np.asarray(afs, dtype=np.int64)
+        where = {int(a): i for i, a in enumerate(self.af)}
+        missing = [int(a) for a in want if int(a) not in where]
+        if missing:
+            raise KeyError(
+                f"averaging factors {missing} are not in this result "
+                f"(af {int(self.af[0])}..{int(self.af[-1])})"
+            )
+        take = [where[int(a)] for a in want]
+        return replace(
+            self,
+            af=self.af[take],
+            tau_s=self.tau_s[take],
+            var=self.var[take],
+            n_terms=self.n_terms[take],
+            coeffs=tuple(self.coeffs[i] for i in take) if self.coeffs else (),
+            run_terms=tuple(self.run_terms[i] for i in take)
+            if self.run_terms else (),
+        )
 
 
 def as_phase(series: PhaseSeries | FreqSeries) -> PhaseSeries:

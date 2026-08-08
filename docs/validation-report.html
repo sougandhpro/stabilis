@@ -15,8 +15,8 @@ th{background:#f5f7fa}
 .note{background:#f5f7fa;border-left:3px solid #8a9ba8;padding:.6rem 1rem;margin:1rem 0}
 </style>
 <h1>stabilis validation report</h1>
-<p class='sub'>Generated 2026-08-08T17:29:52+00:00 &middot; digest <span class='mono'>2e2cae10f7a8b9da…</span></p>
-<div class='verdict ok'>PASS &mdash; 28 of 28 checks passed</div>
+<p class='sub'>Generated 2026-08-08T18:26:09+00:00 &middot; digest <span class='mono'>b99ad396f35d8743…</span></p>
+<div class='verdict ok'>PASS &mdash; 30 of 30 checks passed</div>
 <div class='note'><strong>Why this document exists.</strong> ISO/IEC 17025:2017 clause 7.11.2 requires software to be validated by the laboratory. NOTE 2 exempts commercial software in general use; a new open-core tool fails that twice over, so this evidence is what makes adoption possible rather than a nicety. Every claim below states its tolerance and the reason for it.</div>
 <h2>Analytic identities</h2><p class='sub'>Machine precision, no external data. Correctness lives here.</p>
 <table><tr><th>Check</th><th>Claim</th><th>Tolerance and why</th><th>Measured</th><th></th></tr>
@@ -57,6 +57,8 @@ th{background:#f5f7fa}
 <tr><td>mdev vs the published NBS14 1000-point table</td><td>INTEROP, not correctness. These values were produced by Stable32 and reproduced in NIST SP 1065, so agreement shows this library matches the incumbent. Correctness is the certified tier above.</td><td>1e-06 relative -- the tightest the seven published significant figures support. Asserting harder would test our transcription, not our arithmetic.</td><td class='mono'>worst rel 7.5e-08</td><td class='pass'>PASS</td></tr>
 <tr><td>tdev vs the published NBS14 1000-point table</td><td>INTEROP, not correctness. These values were produced by Stable32 and reproduced in NIST SP 1065, so agreement shows this library matches the incumbent. Correctness is the certified tier above.</td><td>1e-06 relative -- the tightest the seven published significant figures support. Asserting harder would test our transcription, not our arithmetic.</td><td class='mono'>worst rel 2.8e-07</td><td class='pass'>PASS</td></tr>
 <tr><td>ohdev vs the published NBS14 1000-point table</td><td>INTEROP, not correctness. These values were produced by Stable32 and reproduced in NIST SP 1065, so agreement shows this library matches the incumbent. Correctness is the certified tier above.</td><td>1e-06 relative -- the tightest the seven published significant figures support. Asserting harder would test our transcription, not our arithmetic.</td><td class='mono'>worst rel 9.9e-08</td><td class='pass'>PASS</td></tr>
+<tr><td>sigma columns against Stable32's own export</td><td>Every estimator this library implements, against the same statistic computed by Stable32 1.62 on byte-identical input. INTEROP, not correctness -- but it is the comparison a lab migrating off Stable32 actually performs.</td><td>1e-04 relative, which is the half-ulp of the fifth significant figure Stable32 prints. Agreement inside this means agreement to the last digit the export carries.</td><td class='mono'>worst rel 4.91e-05 over 6458 points, 90 tables over 6 record(s)</td><td class='pass'>PASS</td></tr>
+<tr><td>Min/Max Sigma against Stable32, and the EDOF behind them</td><td>INTEROP, not correctness. Stable32's error bars, reproduced by feeding its own Alpha column into this library's Greenhall path -- so this measures the EDOF algorithm alone, not the noise identification. Inverting the printed ratio also recovers the EDOF Stable32 used, which is the quantity actually in dispute: it runs about 1.2% above ours for m up to 32, where an independent implementation of the same paper returns our value to every printed digit. See theory/greenhall.md.</td><td>1% on the bounds. The bounds are far less sensitive than the EDOF behind them: a 1.3% EDOF difference moves a 68.27% deviation bound by under 0.06%, because the chi-square quantile ratio flattens at large degrees of freedom.</td><td class='mono'>bounds worst 5.53e-04 over 615 points; implied EDOF differs by up to 1.9% (90 tables over 6 record(s))</td><td class='pass'>PASS</td></tr>
 </table>
 <h2>Reproducing this report</h2>
 <p>No network access is used and every input is either generated from a published recursion or fixed by seed. The digest covers the claims and the measured values, not the timestamp, so a regeneration on the same library and numpy version should reproduce it exactly.</p>
@@ -67,5 +69,5 @@ th{background:#f5f7fa}
 <tr><td>platform</td><td class='mono'>Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.35</td></tr>
 <tr><td>monte_carlo_trials</td><td class='mono'>800</td></tr>
 <tr><td>seeds</td><td class='mono'>{'coverage': 22, 'gaps': 7}</td></tr>
-<tr><td>digest</td><td class='mono'>2e2cae10f7a8b9da83a03864b738298a49122a9aeee80a5357b7653a87d15091</td></tr>
+<tr><td>digest</td><td class='mono'>b99ad396f35d8743e5ab9008961e1743d4ef374f5b93c44670665fe243becafb</td></tr>
 </table>

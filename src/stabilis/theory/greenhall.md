@@ -344,9 +344,58 @@ columns need a reference session that has not happened yet. So, in
   at d = 3 is unreachable there. Both are implemented here and covered by
   the structural tests.
 
-**Not yet validated:** agreement with actual Stable32 output. Until that
-reference session happens, the claim is "implements the published
-algorithm", not "matches Stable32", and the report says so.
+## Against Stable32 itself
+
+The reference session has begun, and `tests/data/stable32/outputs/` now
+carries real Stable32 1.62 exports. What they show:
+
+* **The `#` (term count) column agrees exactly**, as integers, on every
+  row of every table. No tolerance is involved, and it is where an
+  off-by-one in the algebraic limit or the overlap stride would surface
+  first.
+* **The sigma columns agree to the last digit Stable32 prints** — worst
+  relative difference `4.9e-5` over 3229 points, against the `5e-5`
+  half-ulp of its fifth significant figure. That covers `adev`, `oadev`,
+  `mdev`, `tdev` and `ohdev` across the `all`, `octave` and `decade` grids.
+* **`Min Sigma` and `Max Sigma` agree to 5.5e-4** when Stable32's own
+  `Alpha` column is fed into this library's Greenhall path — which is the
+  comparison that isolates the EDOF algorithm from the noise
+  identification.
+
+### The EDOF behind those bounds differs, and by a definite amount
+
+`sigma_hi/sigma` depends on nothing but the degrees of freedom and the
+confidence level, so Stable32's *implied* EDOF inverts out of its own
+printed columns. Doing that:
+
+| averaging factor | their EDOF / ours (median) |
+|---|---|
+| 1 – 32 | **1.012** |
+| 40 – 1024 | **1.001** |
+
+A consistent ~1.2 % excess at small `m`, falling to ~0.1 % by `m ≈ 40`.
+
+**This is a difference in Stable32, not a defect here, as far as two
+independent implementations can establish.** On the same inputs
+`allantools.edf_greenhall` returns *our* value to every printed digit —
+3204.987 against Stable32's 3245.622 at α = 0, d = 2, m = 1, N = 4097 —
+and the simplified procedure of eq. (13) does not explain the gap either:
+it coincides with the full procedure exactly over the whole range where
+the 1.2 % excess appears, and diverges the *other* way above it.
+
+So two separate readings of the paper agree with each other and disagree
+with the program. What Stable32 does differently is not known, and is
+recorded rather than guessed at.
+
+**What it costs in practice: under 0.06 % on a 68.27 % deviation bound.**
+The chi-square quantile ratio flattens at large degrees of freedom, so a
+percent of EDOF is worth well under a tenth of a percent of error bar. A
+lab diffing an old report against a new one will see the bounds move in
+the fourth decimal place, and this is the reason.
+
+**Still owed:** the session covers synthetic records only so far. Real
+oscillator data and the public NBS suites are still to come — see the run
+sheet at `tests/data/stable32/README.md`.
 
 ## References
 
