@@ -215,8 +215,9 @@ def test_the_page_offers_column_and_unit_controls(server):
     """Asked for directly: pick which column, and say what units it is in."""
     with urllib.request.urlopen(server + "/") as r:
         page = r.read().decode()
-    for element in ('id="column"', 'id="time_column"', 'id="unit"',
-                    'id="dirpath"', 'id="godir"'):
+    for element in ('id="columns"', 'id="time_column"', 'id="unit"',
+                    'id="dirpath"', 'id="godir"', 'id="serieslist"',
+                    'id="samerange"'):
         assert element in page, element
     assert '"ns"' in page and '"ps"' in page
 
@@ -397,3 +398,98 @@ def test_no_preparation_means_no_calls_and_no_claim_of_any(server):
     assert status == 200, body
     assert body["prep"]["calls"] == []
     assert body["prep"]["summary"]["n"] == 600
+
+
+# ---------------------------------------------------------------------------
+# Several columns at once
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def multi(tmp_path):
+    """Three columns on wildly different scales, as a real export has."""
+    rng = np.random.default_rng(4)
+    n = 3000
+    a = np.cumsum(rng.standard_normal(n)) * 1e-12
+    b = np.cumsum(rng.standard_normal(n)) * 1e-9
+    c = np.cumsum(rng.standard_normal(n)) * 1e-15
+    np.savetxt(tmp_path / "three.dat", np.column_stack([a, b, c]), fmt="%.15e")
+    return tmp_path
+
+
+def test_preview_stacks_one_panel_per_column(multi, server):
+    """Stacked, not overlaid: on one axis the 1e-9 column would flatten the
+    other two into lines at zero, which is the opposite of a preview."""
+    _Handler.root = multi.resolve()
+    status, body = post(server, "/api/preview", {
+        "path": "three.dat", "columns": [0, 1, 2],
+        "labels": ["A-B", "B-C", "C-A"], "rate": "1.0", "unit": "s"})
+    assert status == 200, body
+    assert body["panels"] == 3
+    assert [s["label"] for s in body["series"]] == ["A-B", "B-C", "C-A"]
+    assert all(s["n"] == 3000 for s in body["series"])
+
+
+def test_an_unlabelled_column_gets_a_usable_default(multi, server):
+    _Handler.root = multi.resolve()
+    _status, body = post(server, "/api/preview",
+                         {"path": "three.dat", "columns": [1], "rate": "1.0"})
+    assert body["series"][0]["label"] == "column 1"
+
+
+def test_each_column_can_carry_its_own_range(multi, server):
+    """The per-series ranges, applied independently."""
+    _Handler.root = multi.resolve()
+    status, body = post(server, "/api/analyze", {
+        "path": "three.dat", "columns": [0, 1], "labels": ["first", "second"],
+        "ranges": [[0, 1000], [2000, 3000]], "rate": "1.0", "taus": "octave",
+        "reason": "per-series windows"})
+    assert status == 200, body
+    assert len(body["series"]) == 2
+    assert body["series"][0]["prep"]["summary"]["n"] == 1000
+    assert body["series"][1]["prep"]["summary"]["n"] == 1000
+    assert "0, 1000" in body["series"][0]["prep"]["calls"][0]
+    assert "2000, 3000" in body["series"][1]["prep"]["calls"][0]
+
+
+def test_one_range_can_be_shared_by_every_column(multi, server):
+    """What the "one range for all" box does, expressed as identical spans."""
+    _Handler.root = multi.resolve()
+    _status, body = post(server, "/api/analyze", {
+        "path": "three.dat", "columns": [0, 1, 2],
+        "ranges": [[500, 1500]] * 3, "rate": "1.0", "taus": "octave",
+        "reason": "same window everywhere"})
+    assert {s["prep"]["summary"]["n"] for s in body["series"]} == {1000}
+
+
+def test_every_column_appears_as_its_own_curve(multi, server):
+    """Overlaid here, unlike the preview: a sigma-tau plot is already
+    log-log, and comparing channels on one axis is the point of it."""
+    _Handler.root = multi.resolve()
+    _status, body = post(server, "/api/analyze", {
+        "path": "three.dat", "columns": [0, 1, 2],
+        "labels": ["x", "y", "z"], "rate": "1.0", "taus": "octave"})
+    assert [s["label"] for s in body["series"]] == ["x", "y", "z"]
+    assert all(len(s["rows"]) > 5 for s in body["series"])
+    # Different scales must give different answers -- proof the columns are
+    # actually distinct rather than column 0 read three times.
+    firsts = [s["rows"][0]["dev"] for s in body["series"]]
+    assert firsts[1] > firsts[0] > firsts[2]
+
+
+def test_the_page_binds_the_drag_so_the_browser_cannot_steal_it():
+    """The bug that made selection do nothing.
+
+    An `<img>` is natively draggable, so mousedown starts the browser's own
+    image drag and swallows every mousemove and mouseup after it. Both the
+    attribute and the preventDefault are needed, and neither is visible to
+    an HTTP-level test -- hence checking the page source.
+    """
+    from stabilis.gui import PAGE
+
+    assert 'draggable="false"' in PAGE
+    assert "ev.preventDefault()" in PAGE
+    assert "img.ondragstart" in PAGE
+    # Release is tracked on the window, so letting go outside the plot
+    # still completes the selection.
+    assert "window.onmouseup" in PAGE

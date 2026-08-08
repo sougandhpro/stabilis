@@ -90,13 +90,18 @@ def _listing(root: Path, rel: str) -> dict:
 
 
 def _analyze(root: Path, req: dict) -> dict:
-    """Run one estimator and return a PNG plus the numbers behind it.
+    """Run one estimator over every requested column and plot them together.
+
+    Several columns overlay happily *here*, unlike in the preview: a
+    sigma-tau plot is already log-log and comparing channels on one axis is
+    the entire reason to have more than one.
 
     The table is returned alongside the image on purpose: a picture is not
     a result, and anything worth pasting into a notebook is in the table.
     """
     import matplotlib
     matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     from . import plot as plotting
     from .io import load_frequency, load_phase
@@ -108,73 +113,80 @@ def _analyze(root: Path, req: dict) -> dict:
     is_phase = req.get("data_kind", "phase") == "phase"
     loader = load_phase if is_phase else load_frequency
     time_column = int(req["time_column"]) if req.get("time_column") else None
-    series = loader(path, rate_hz=rate,
-                    column=int(req.get("column") or 0),
-                    time_column=time_column)
-    series = _rescale(series, req.get("unit"), is_phase)
-    series, prep = _prepare(series, req)
 
     name = req.get("estimator", "oadev")
     if name not in ESTIMATORS:
         raise ValueError(f"unknown estimator {name!r}")
-    kwargs = {"taus": req.get("taus", "octave")}
-    if req.get("max_af"):
-        kwargs["max_af"] = int(req["max_af"])
-    # Coefficient arrays exist only for the confidence interval, and they
-    # cost one array of order n per tau. Asking for them when the bounds
-    # are switched off is how a large record turns into gigabytes for
-    # nothing. MTIE and TIE rms take no such argument.
     want_ci = bool(req.get("confidence", True))
-    if name not in ("mtie", "tierms"):
-        kwargs["keep_coeffs"] = want_ci
-    result = get("estimator", name)(series, **kwargs)
 
-    ci = None
-    if want_ci and result.is_variance:
-        ci = confidence(result, level=float(req.get("level", 0.6827)))
+    ax, out_series, notes = None, [], []
+    for col, label, span in _columns_from(req):
+        series = loader(path, rate_hz=rate, column=col, time_column=time_column)
+        series = _rescale(series, req.get("unit"), is_phase)
+        series, prep = _prepare(series, dict(req, start=span[0], stop=span[1]))
 
-    ax = plotting.sigma_tau(result, confidence=ci, label=path.name)
+        kwargs = {"taus": req.get("taus", "octave")}
+        if req.get("max_af"):
+            kwargs["max_af"] = int(req["max_af"])
+        # Coefficient arrays exist only for the confidence interval, and
+        # they cost one array of order n per tau. Asking for them when the
+        # bounds are off is how a large record becomes gigabytes for
+        # nothing. MTIE and TIE rms take no such argument.
+        if name not in ("mtie", "tierms"):
+            kwargs["keep_coeffs"] = want_ci
+        result = get("estimator", name)(series, **kwargs)
+
+        ci = None
+        if want_ci and result.is_variance:
+            ci = confidence(result, level=float(req.get("level", 0.6827)))
+        ax = plotting.sigma_tau(result, confidence=ci, label=label, ax=ax)
+
+        rows = []
+        for i, af in enumerate(result.af.tolist()):
+            row = {"af": af, "tau": result.tau_s[i],
+                   "n": int(result.n_terms[i]), "dev": result.dev[i]}
+            if ci is not None:
+                row["lo"], row["hi"] = ci.dev_lo[i], ci.dev_hi[i]
+                row["edof"], row["via"] = ci.edof[i], ci.method[i]
+            rows.append(row)
+        out_series.append({
+            "label": label, "column": col, "rows": rows,
+            "prep": prep, "n": series.n, "has_ci": ci is not None,
+        })
+        if series.n_gaps:
+            notes.append(f"{label}: {series.n_gaps} gaps; see "
+                         "`stabilis docs gaps` for how they were handled.")
+        if ci is None and not result.is_variance:
+            notes.append(f"{name} is not a variance, so it has no chi-square "
+                         "interval and none is shown. See "
+                         "`stabilis docs mtie`.")
+
     if req.get("slopes"):
         plotting.slope_guides(ax)
-    ax.set_title(f"{name} — {path.name}")
+    ax.set_title(f"{name} \u2014 {path.name}")
     buf = io.BytesIO()
     fig = ax.get_figure()
     fig.tight_layout()
     fig.savefig(buf, format="png", dpi=130)
-    import matplotlib.pyplot as plt
     plt.close(fig)
 
-    rows = []
-    for i, af in enumerate(result.af.tolist()):
-        row = {"af": af, "tau": result.tau_s[i], "n": int(result.n_terms[i]),
-               "dev": result.dev[i]}
-        if ci is not None:
-            row["lo"], row["hi"] = ci.dev_lo[i], ci.dev_hi[i]
-            row["edof"], row["via"] = ci.edof[i], ci.method[i]
-        rows.append(row)
-
-    notes = []
-    if series.n_gaps:
-        notes.append(f"{series.n_gaps} gaps in the record; "
-                     "see `stabilis docs gaps` for how they were handled.")
-    if ci is None and not result.is_variance:
-        notes.append(f"{name} is not a variance, so it has no chi-square "
-                     "interval and none is shown. See `stabilis docs mtie`.")
+    first = out_series[0]
     return {
         "png": base64.b64encode(buf.getvalue()).decode("ascii"),
-        "kind": result.kind, "n": series.n, "rate_hz": series.rate_hz,
-        "rows": rows, "notes": notes,
-        "has_ci": ci is not None,
-        "prep": prep,
+        "kind": name, "n": first["n"], "rate_hz": rate or 1.0,
+        "rows": first["rows"], "notes": notes,
+        "has_ci": first["has_ci"],
+        "series": out_series,
+        "prep": first["prep"],
         "read_as": "phase" if is_phase else "frequency",
         "unit": req.get("unit") or ("s" if is_phase else "fractional"),
-        "column": int(req.get("column") or 0),
+        "column": first["column"],
     }
 
 
 # A preview is a picture, and a picture has a few thousand pixels. Sending
-# a million points to matplotlib to draw them on top of each other is slow
-# and looks identical.
+# a million points to matplotlib to draw on top of each other is slow and
+# looks identical.
 PREVIEW_POINTS = 2000
 
 
@@ -182,11 +194,12 @@ def _decimate(values: np.ndarray, target: int = PREVIEW_POINTS):
     """Min/max decimation: one pair per bucket, so spikes survive.
 
     **Not stride sampling.** Taking every k-th point would hide exactly the
-    outliers this view exists to find -- a one-sample glitch has a k-1 in k
-    chance of vanishing. Keeping the minimum and maximum of each bucket
-    preserves the visual envelope, so a spike is still a spike at any zoom.
+    outliers this view exists to find -- a one-sample glitch has a (k-1)/k
+    chance of vanishing, 96% at the reduction used here. Keeping the
+    minimum and maximum of each bucket preserves the visual envelope, so a
+    spike is still a spike.
 
-    Returns `(index, value)` pairs at the original sample indices, so a
+    Returns `(index, value)` pairs at the *original* sample indices, so a
     range dragged on the preview means the same thing to `select_range`.
     """
     n = values.size
@@ -213,8 +226,36 @@ def _decimate(values: np.ndarray, target: int = PREVIEW_POINTS):
     return np.asarray(idx), np.asarray(out)
 
 
+def _columns_from(req: dict):
+    """The (column, label, range) triples the page asked for.
+
+    One entry means the old single-column behaviour; the request shape is
+    the same either way so nothing special-cases the common case.
+    """
+    cols = req.get("columns")
+    if not cols:
+        cols = [int(req.get("column") or 0)]
+    cols = [int(c) for c in cols]
+    labels = list(req.get("labels") or [])
+    ranges = list(req.get("ranges") or [])
+    out = []
+    for i, col in enumerate(cols):
+        label = (labels[i] if i < len(labels) and labels[i] else f"column {col}")
+        span = ranges[i] if i < len(ranges) else None
+        if span is None:
+            span = [req.get("start"), req.get("stop")]
+        out.append((col, str(label), span))
+    return out
+
+
 def _preview(root: Path, req: dict) -> dict:
-    """The raw column, decimated, plus what stabilis would suggest for it.
+    """The raw columns, decimated, plus what stabilis would suggest.
+
+    Stacked subplots sharing one x-axis rather than curves overlaid on one:
+    different columns of a real export are different quantities on wildly
+    different scales, and overlaying them makes every one but the largest
+    a flat line. Sharing x is what lets a range dragged on any panel mean
+    the same sample indices in all of them.
 
     Deliberately cheap and deliberately *before* any estimator runs: the
     point is to see the data in order to choose a range, and a preview that
@@ -228,51 +269,75 @@ def _preview(root: Path, req: dict) -> dict:
     from .tau import suggest
 
     path = _safe(root, req["path"])
-    column = int(req.get("column") or 0)
+    wanted = _columns_from(req)
     time_column = int(req["time_column"]) if req.get("time_column") else None
-    values, times, defects = read_text(path, column=column,
-                                       time_column=time_column)
     is_phase = req.get("data_kind", "phase") == "phase"
     factor = (PHASE_UNITS if is_phase else FREQ_UNITS).get(req.get("unit"), 1.0)
-    values = values * factor
 
     rate = float(req["rate"]) if req.get("rate") else None
-    jitter = None
-    if times is not None:
-        from .io.timebase import infer_rate, parse_times
-        try:
-            seconds, _epoch, _fmt = parse_times(times, req.get("time_format"))
-            rate, jitter = infer_rate(seconds)
-        except Exception:
-            pass                       # fall back to whatever was typed
+    jitter, defects, n = None, None, 0
+    series_info, columns = [], []
+    for col, label, span in wanted:
+        values, times, defects = read_text(path, column=col,
+                                           time_column=time_column)
+        values = values * factor
+        n = int(values.size)
+        if times is not None and rate is None:
+            from .io.timebase import infer_rate, parse_times
+            try:
+                seconds, _epoch, _fmt = parse_times(times, req.get("time_format"))
+                rate, jitter = infer_rate(seconds)
+            except Exception:
+                pass
+        columns.append((label, values, span))
     rate = rate or 1.0
 
-    idx, shown = _decimate(values)
-    fig, ax = plt.subplots(figsize=(9.0, 3.2))
-    ax.plot(idx / rate, shown, linewidth=0.8)
-    ax.set_xlabel("time from start (s)")
-    ax.set_ylabel("phase (s)" if is_phase else "fractional frequency")
-    ax.grid(True, alpha=0.3)
-    if req.get("start") or req.get("stop"):
-        lo = float(req.get("start") or 0) / rate
-        hi = float(req.get("stop") or values.size) / rate
-        ax.axvspan(lo, hi, alpha=0.18, color="tab:orange")
+    height = max(2.4, 1.5 * len(columns) + 0.9)
+    fig, axes = plt.subplots(len(columns), 1, figsize=(9.0, height),
+                             sharex=True, squeeze=False)
+    for ax, (label, values, span) in zip(axes[:, 0], columns):
+        idx, shown = _decimate(values)
+        ax.plot(idx / rate, shown, linewidth=0.8)
+        ax.set_ylabel(label, fontsize=9)
+        ax.grid(True, alpha=0.3)
+        lo, hi = _span_indices(span, values.size)
+        if lo != 0 or hi != values.size:
+            ax.axvspan(lo / rate, hi / rate, alpha=0.18, color="tab:orange")
+        finite = np.isfinite(values)
+        series_info.append({
+            "label": label, "n": int(values.size),
+            "n_gaps": int((~finite).sum()), "shown": int(shown.size),
+            "start": int(lo), "stop": int(hi),
+        })
+    axes[-1, 0].set_xlabel("time from start (s)")
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=110)
     plt.close(fig)
 
-    finite = np.isfinite(values)
+    first = series_info[0]
     return {
         "png": base64.b64encode(buf.getvalue()).decode("ascii"),
-        "n": int(values.size),
+        "n": n,
         "rate_hz": float(rate),
         "jitter": None if jitter is None else float(jitter),
-        "n_gaps": int((~finite).sum()),
-        "shown": int(shown.size),
-        "defects": None if defects.clean else defects.describe(),
-        "suggest": suggest(int(values.size), float(rate)),
+        "panels": len(columns),
+        "series": series_info,
+        # Mirrors of the first panel, so a single-column caller need not
+        # know that the shape grew a list.
+        "shown": first["shown"],
+        "n_gaps": first["n_gaps"],
+        "defects": None if defects is None or defects.clean else defects.describe(),
+        "suggest": suggest(n, float(rate)),
     }
+
+
+def _span_indices(span, size: int) -> tuple[int, int]:
+    """A `[start, stop]` pair from the page into real indices."""
+    lo, hi = (span or [None, None])[:2]
+    lo = 0 if lo in (None, "") else max(0, int(lo))
+    hi = size if hi in (None, "") else min(size, int(hi))
+    return lo, hi
 
 
 def _prepare(series, req: dict):
@@ -286,8 +351,17 @@ def _prepare(series, req: dict):
     from .edit import drop_outliers, select_range, summary
 
     lines = []
-    start = int(req["start"]) if str(req.get("start", "")).strip() else None
-    stop = int(req["stop"]) if str(req.get("stop", "")).strip() else None
+
+    def _bound(value):
+        # `str(None)` is "None", which is truthy -- so testing the string
+        # accepted a None straight through to int() and raised. Check the
+        # value itself.
+        if value is None or str(value).strip() == "":
+            return None
+        return int(value)
+
+    start = _bound(req.get("start"))
+    stop = _bound(req.get("stop"))
     if start is not None or stop is not None:
         reason = req.get("reason") or "selected in the stabilis gui"
         series = select_range(series, start, stop, by="index", reason=reason)
@@ -491,6 +565,13 @@ pre.calls { background: rgba(128,128,128,.14); padding: 8px 10px;
 .pill { display: inline-block; padding: 1px 7px; border-radius: 9px;
         background: rgba(128,128,128,.25); font-size: 11px; margin-right: 6px; }
 .warn { color: #d08000; }
+#serieslist { width: 100%; border-collapse: collapse; font-size: 12px; }
+#serieslist td { padding: 2px 3px; }
+#serieslist input { padding: 3px; font-size: 12px; }
+#serieslist tr { cursor: pointer; }
+#serieslist tr.active { outline: 1px solid #f90; background: rgba(255,150,0,.10); }
+#serieslist .num { width: 62px; }
+.aim { font-size: 11px; opacity: .7; }
 table { border-collapse: collapse; font-size: 12px; margin-top: 14px; }
 th, td { padding: 3px 10px 3px 0; text-align: right; white-space: nowrap; }
 th { border-bottom: 1px solid rgba(128,128,128,.5); text-align: right; }
@@ -517,13 +598,13 @@ td.via { text-align: left; opacity: .7; }
     <div><label>units in file</label><select id="unit"></select></div>
   </div>
   <div class="row">
-    <div><label>data column</label><input id="column" value="0"></div>
+    <div><label>data columns</label><input id="columns" value="0"></div>
     <div><label>time column</label><input id="time_column" placeholder="none"></div>
   </div>
-  <div class="row">
-    <div><label>from sample</label><input id="start" placeholder="start"></div>
-    <div><label>to sample</label><input id="stop" placeholder="end"></div>
-  </div>
+  <label>series &mdash; click a row to aim the drag at it</label>
+  <table id="serieslist"></table>
+  <div class="chk"><input type="checkbox" id="samerange">
+    <label for="samerange" style="margin:0">one range for all series</label></div>
   <label>reason for the selection (goes in the record)</label>
   <input id="reason" placeholder="e.g. after warm-up">
   <label>outlier threshold (MAD sigmas, blank = keep all)</label>
@@ -606,19 +687,71 @@ function add(text, fn, isDir) {
 }
 function fmt(n) { return n > 1e6 ? (n/1e6).toFixed(1)+" MB"
                  : n > 1e3 ? (n/1e3).toFixed(0)+" kB" : n+" B"; }
-// ---- preview: the point is to see the data before choosing a range ----
+// ---- series: one row per column, each with its own range --------------
+let series = [{column: 0, label: "", start: "", stop: ""}];
+let active = 0;
 let previewInfo = null;
+
+function parseColumns() {
+  const raw = $("columns").value.split(/[,\s]+/).filter(s => s !== "");
+  const cols = raw.map(Number).filter(n => Number.isInteger(n) && n >= 0);
+  const kept = cols.length ? cols : [0];
+  // Keep whatever the user already typed for a column that is still here,
+  // so editing the list does not silently discard a label or a range.
+  const before = {};
+  for (const s of series) before[s.column] = s;
+  series = kept.map(c => before[c] || {column: c, label: "", start: "", stop: ""});
+  if (active >= series.length) active = 0;
+  renderSeries();
+}
+function renderSeries() {
+  const rows = series.map((s, i) =>
+    '<tr class="' + (i === active ? "active" : "") + '" data-i="' + i + '">'
+    + '<td class="aim">' + s.column + '</td>'
+    + '<td><input data-f="label" data-i="' + i + '" value="' + esc(s.label)
+    + '" placeholder="label"></td>'
+    + '<td><input class="num" data-f="start" data-i="' + i + '" value="'
+    + esc(s.start) + '" placeholder="from"></td>'
+    + '<td><input class="num" data-f="stop" data-i="' + i + '" value="'
+    + esc(s.stop) + '" placeholder="to"></td></tr>').join("");
+  $("serieslist").innerHTML = rows;
+  for (const tr of $("serieslist").querySelectorAll("tr"))
+    tr.onclick = ev => {
+      if (ev.target.tagName === "INPUT") return;
+      active = Number(tr.dataset.i); renderSeries();
+    };
+  for (const el of $("serieslist").querySelectorAll("input"))
+    el.onchange = () => {
+      series[Number(el.dataset.i)][el.dataset.f] = el.value;
+      preview();
+    };
+}
+function esc(s) {
+  return String(s === undefined || s === null ? "" : s)
+    .replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+function requestBody(extra) {
+  return Object.assign({
+    path: picked, data_kind: $("data_kind").value,
+    columns: series.map(s => s.column),
+    labels: series.map(s => s.label),
+    ranges: series.map(s => [s.start === "" ? null : Number(s.start),
+                             s.stop === "" ? null : Number(s.stop)]),
+    time_column: $("time_column").value, unit: $("unit").value,
+    rate: $("rate").value, reason: $("reason").value,
+    outlier_threshold: $("outlier_threshold").value,
+  }, extra || {});
+}
+
+// ---- preview: the point is to see the data before choosing a range ----
 async function preview() {
   if (!picked) return;
   $("err").textContent = "";
   $("prep").innerHTML = '<p class="muted">reading...</p>';
-  const body = { path: picked, data_kind: $("data_kind").value,
-    column: $("column").value, time_column: $("time_column").value,
-    unit: $("unit").value, rate: $("rate").value,
-    start: $("start").value, stop: $("stop").value };
   try {
     const r = await fetch("/api/preview", { method: "POST",
-      headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(requestBody()) });
     const j = await r.json();
     if (j.error) { $("prep").innerHTML = ""; $("err").textContent = j.error; return; }
     previewInfo = j;
@@ -627,23 +760,24 @@ async function preview() {
   } catch (e) { $("err").textContent = String(e); }
 }
 function drawPreview(j) {
-  const e = s => String(s).replace(/[&<>"]/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  let h = '<div id="prevwrap"><img id="prev" src="data:image/png;base64,'
-        + j.png + '"><div id="band"></div></div>';
+  let h = '<div id="prevwrap"><img id="prev" draggable="false" '
+        + 'src="data:image/png;base64,' + j.png + '"><div id="band"></div></div>';
   h += '<p class="note"><span class="pill">' + j.n + ' points</span>'
      + '<span class="pill">' + j.rate_hz.toPrecision(6) + ' Hz</span>'
-     + '<span class="pill">' + j.n_gaps + ' gaps</span>'
-     + '<span class="pill">showing ' + j.shown + '</span></p>';
+     + '<span class="pill">' + j.panels + ' series</span>'
+     + '<span class="pill">' + j.n_gaps + ' gaps</span></p>';
   if (j.jitter !== null && j.jitter > 1e-3)
     h += '<p class="note warn">timestamps are ragged: interquartile spread '
        + (j.jitter*100).toFixed(2) + '% of the median interval. The rate '
        + 'above is the median; the grid is not uniform.</p>';
   if (j.defects)
-    h += '<p class="note warn">file defects tolerated: ' + e(j.defects) + '</p>';
-  h += '<p class="note">suggested tau grid: <b>' + e(j.suggest.mode) + '</b> to AF '
-     + j.suggest.max_af + ' (' + j.suggest.n_taus + ' points) &mdash; '
-     + e(j.suggest.why) + ' <button id="usesuggest" class="inline">use it</button></p>';
+    h += '<p class="note warn">file defects tolerated: ' + esc(j.defects) + '</p>';
+  h += '<p class="note">drag on the plot to set the range for <b>'
+     + esc(series[active].label || ("column " + series[active].column))
+     + '</b>' + ($("samerange").checked ? " and every other series" : "")
+     + '. Suggested tau grid: <b>' + esc(j.suggest.mode) + '</b> to AF '
+     + j.suggest.max_af + ' (' + j.suggest.n_taus + ' points) '
+     + '<button id="usesuggest" class="inline">use it</button></p>';
   $("prep").innerHTML = h;
   $("usesuggest").onclick = () => {
     $("taus").value = j.suggest.mode;
@@ -651,6 +785,7 @@ function drawPreview(j) {
   };
   wireDrag();
 }
+
 // Dragging maps pixels back to sample indices, so what is dragged and what
 // `edit.select_range` receives are the same thing.
 function wireDrag() {
@@ -662,41 +797,57 @@ function wireDrag() {
     const f = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
     return Math.round(f * previewInfo.n);
   };
-  wrap.onmousedown = ev => { from = toSample(ev); band.style.display = "block"; };
-  wrap.onmousemove = ev => {
-    if (from === null) return;
+  const paint = (a, b) => {
     const box = img.getBoundingClientRect();
-    const a = Math.min(from, toSample(ev)) / previewInfo.n * box.width;
-    const b = Math.max(from, toSample(ev)) / previewInfo.n * box.width;
-    band.style.left = a + "px"; band.style.width = (b - a) + "px";
+    const lo = Math.min(a, b) / previewInfo.n * box.width;
+    const hi = Math.max(a, b) / previewInfo.n * box.width;
+    band.style.display = "block";
+    band.style.left = lo + "px";
+    band.style.width = (hi - lo) + "px";
   };
-  wrap.onmouseup = ev => {
+  // preventDefault matters: an <img> is natively draggable, and without it
+  // the browser starts its own image drag on mousedown and swallows every
+  // mousemove and mouseup after -- which is why selection did nothing.
+  img.ondragstart = () => false;
+  wrap.onmousedown = ev => { ev.preventDefault(); from = toSample(ev);
+                             paint(from, from); };
+  wrap.onmousemove = ev => { if (from !== null) paint(from, toSample(ev)); };
+  // Listen for the release on the window, so letting go outside the plot
+  // still completes the selection instead of leaving it stuck.
+  window.onmouseup = ev => {
     if (from === null) return;
-    const to = toSample(ev);
-    const lo = Math.min(from, to), hi = Math.max(from, to);
+    const a = from, b = toSample(ev);
     from = null;
-    if (hi - lo < 2) { band.style.display = "none";
-                       $("start").value = ""; $("stop").value = ""; return; }
-    $("start").value = lo; $("stop").value = hi;
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    if (hi - lo < 2) {
+      band.style.display = "none";
+      applyRange("", "");
+      return;
+    }
+    applyRange(lo, hi);
   };
 }
-for (const id of ["column", "time_column", "unit", "data_kind"])
+function applyRange(lo, hi) {
+  const targets = $("samerange").checked
+    ? series.map((_s, i) => i) : [active];
+  for (const i of targets) { series[i].start = lo; series[i].stop = hi; }
+  renderSeries();
+  preview();
+}
+
+$("columns").addEventListener("change", parseColumns);
+$("samerange").addEventListener("change", () => { if (previewInfo) preview(); });
+for (const id of ["time_column", "unit", "data_kind"])
   $(id).addEventListener("change", preview);
-for (const id of ["start", "stop"])
-  $(id).addEventListener("change", () => { if (previewInfo) preview(); });
+parseColumns();
 
 $("go").onclick = async () => {
   $("err").textContent = "";
   if (!picked) { $("err").textContent = "pick a file first"; return; }
   $("go").disabled = true; $("go").textContent = "working...";
-  const body = { path: picked, data_kind: $("data_kind").value,
-    rate: $("rate").value, estimator: $("estimator").value,
+  const body = requestBody({ estimator: $("estimator").value,
     taus: $("taus").value, max_af: $("max_af").value,
-    column: $("column").value, time_column: $("time_column").value,
-    unit: $("unit").value, start: $("start").value, stop: $("stop").value,
-    reason: $("reason").value,
-    outlier_threshold: $("outlier_threshold").value,
-    confidence: $("confidence").checked, slopes: $("slopes").checked };
+    confidence: $("confidence").checked, slopes: $("slopes").checked });
   try {
     const r = await fetch("/api/analyze", { method: "POST",
       headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
@@ -710,33 +861,29 @@ function render(j) {
   const e = n => String(n).replace(/[&<>"]/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   let h = '<img src="data:image/png;base64,' + j.png + '">';
-  h += '<p class="note">' + e(j.kind) + ' · ' + j.n + ' points · '
-     + j.rate_hz + ' Hz · read as ' + e(j.read_as) + ' in ' + e(j.unit)
-     + ', column ' + j.column + '</p>';
+  h += '<p class="note">' + e(j.kind) + ' · ' + j.rate_hz + ' Hz · read as '
+     + e(j.read_as) + ' in ' + e(j.unit) + '</p>';
+  h += '<p class="note">the same thing without the mouse &mdash; an exclusion '
+     + 'that exists only as a gesture is not evidence:</p>';
   for (const n of j.notes) h += '<p class="note">' + e(n) + '</p>';
-  h += "<table><tr><th>AF</th><th>tau (s)</th><th>#</th><th>" + e(j.kind)
-     + "</th>" + (j.has_ci ? "<th>lo</th><th>hi</th><th>EDOF</th><th>via</th>" : "")
-     + "</tr>";
-  for (const r of j.rows) {
-    h += "<tr><td>" + r.af + "</td><td>" + r.tau.toPrecision(5) + "</td><td>"
-       + r.n + "</td><td>" + r.dev.toExponential(5) + "</td>";
-    if (j.has_ci) h += "<td>" + r.lo.toExponential(4) + "</td><td>"
-       + r.hi.toExponential(4) + "</td><td>" + r.edof.toFixed(1)
-       + '</td><td class="via">' + e(r.via) + "</td>";
-    h += "</tr>";
+  for (const s of j.series) {
+    if (j.series.length > 1) h += "<h3>" + e(s.label) + "</h3>";
+    h += "<table><tr><th>AF</th><th>tau (s)</th><th>#</th><th>" + e(j.kind)
+       + "</th>" + (s.has_ci ? "<th>lo</th><th>hi</th><th>EDOF</th><th>via</th>" : "")
+       + "</tr>";
+    for (const r of s.rows) {
+      h += "<tr><td>" + r.af + "</td><td>" + r.tau.toPrecision(5) + "</td><td>"
+         + r.n + "</td><td>" + r.dev.toExponential(5) + "</td>";
+      if (s.has_ci) h += "<td>" + r.lo.toExponential(4) + "</td><td>"
+         + r.hi.toExponential(4) + "</td><td>" + r.edof.toFixed(1)
+         + '</td><td class="via">' + e(r.via) + "</td>";
+      h += "</tr>";
+    }
+    h += "</table>";
+    if (s.prep && s.prep.calls.length)
+      h += '<pre class="calls">' + e(s.prep.calls.join("\n")) + "</pre>";
   }
-  if (j.prep && j.prep.calls.length) {
-    h += '<p class="note">the same thing without the mouse &mdash; an '
-       + 'exclusion that exists only as a gesture is not evidence:</p>';
-    h += '<pre class="calls">' + e(j.prep.calls.join("\n")) + '</pre>';
-  }
-  if (j.prep) {
-    const s = j.prep.summary;
-    h += '<p class="note">analysed ' + s.n + ' points, ' + s.n_gaps + ' gaps ('
-       + (s.gap_fraction*100).toFixed(2) + '%), longest run ' + s.longest_run
-       + '</p>';
-  }
-  document.getElementById("out").innerHTML = h + "</table>";
+  document.getElementById("out").innerHTML = h;
 }
 browse("");
 </script></body></html>
