@@ -6,4 +6,3 @@ venv/
 build/
 dist/
 .pytest_cache/
-validation_report.html

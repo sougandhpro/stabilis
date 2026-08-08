@@ -54,6 +54,38 @@ package imports and computes with both absent.
 
 ## Status
 
+**M2 complete — this is the v0.1 line, the first version from which an
+uncertainty may legitimately be quoted.** 444 tests.
+
+Built on top of M0/M1: pure-numpy special functions (regularized incomplete
+gamma, Wichura AS241 normal quantile, chi-square inverse), data-driven
+degrees of freedom, chi-square confidence intervals, power-law noise
+identification by two independent methods, the deviation bias correction,
+and `stabilis validate`.
+
+Measured coverage of the confidence intervals, over 800 realizations of
+N = 512 at each power law:
+
+| nominal | measured |
+|---|---|
+| 68.27 % (1σ) | 0.61 – 0.77 |
+| 95.45 % (2σ) | 0.90 – 0.99 |
+
+No competing tool publishes that measurement.
+
+```bash
+stabilis validate --out validation-report.html
+```
+
+runs the whole hierarchy — analytic identities, certified values against
+exact rational arithmetic, Monte-Carlo coverage, and Stable32 interop — and
+writes a versioned evidence report. Exit status is the verdict, so it works
+as a gate in a lab's own qualification pipeline. `--self-test` injects a
+check designed to fail, because a validation report that cannot fail is
+worthless. A committed example is at `docs/validation-report.html`.
+
+<details><summary>Earlier milestones</summary>
+
 **M0 and M1 complete.** 154 tests, three commits. Built: immutable
 phase/frequency containers with a float64 precision guard, provenance with
 a step log, the plugin registry, tau selection, Kasdin-Walter synthesis,
@@ -64,13 +96,12 @@ oracle, and the Tier 0 identity suite.
 All five estimators agree with exact rational arithmetic to 14.1-16.3
 correct digits. See `docs/stabilis-progress.pdf`.
 
-**Next: M2** — tapered eta1/eta3 degrees of freedom, a pure-numpy inverse
-chi-square (Wilson-Hilferty start then Newton; Wichura AS241 for the normal
-quantile), confidence intervals, noise identification by lag-1 ACF
-cross-checked against the MDEV log-log slope, and `stabilis validate`
-emitting a versioned evidence report. This is the v0.1 release point and
-the first version from which an uncertainty may legitimately be quoted --
-nothing before it should be used to state one.
+</details>
+
+**Next: M3** — Greenhall EDOF for Stable32 `Min Sigma` / `Max Sigma`
+parity, the MODWT wavelet family whose acceptance test is bit-agreement
+with M1's AVAR, TOTVAR with its bias correction, and the stacked AVAR+MVAR
+power-law decomposition.
 
 The theory pages are readable from the CLI:
 

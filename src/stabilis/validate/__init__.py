@@ -1,5 +1,5 @@
-"""Validation machinery: certified values, checks, and the evidence report."""
+"""Validation as a deliverable: certified oracles and the evidence report."""
 
-from .certified import lre
+from .report import Check, Report, run, to_html, to_json
 
-__all__ = ["lre"]
+__all__ = ["Check", "Report", "run", "to_html", "to_json"]
