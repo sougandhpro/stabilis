@@ -156,6 +156,26 @@ correct digits. See `docs/stabilis-progress.pdf`.
 and the MODWT wavelet family, whose acceptance test is bit-agreement with
 M1's AVAR.
 
+## A GUI, for when flags are tedious
+
+```bash
+stabilis gui                     # opens http://127.0.0.1:8765
+stabilis gui --root ~/data       # confine the file browser to one tree
+```
+
+A small local page: pick a file, choose an estimator and a tau grid, get
+the curve and the numbers behind it. It computes nothing itself — it calls
+the same library functions the CLI does, so the two cannot disagree.
+
+It uses `http.server` from the standard library and your existing browser,
+so nothing new is installed, and it **binds to 127.0.0.1 only** — the page
+reads local files, so a wider bind would be handing a stranger a file
+reader. `--root` narrows that further, and paths trying to climb out of it
+are refused rather than normalized back in.
+
+This is a convenience for the author's own use, not the workbench in the
+roadmap; that is a separate product built on top of this engine.
+
 The theory pages are readable from the CLI:
 
 ```bash
