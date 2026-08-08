@@ -503,7 +503,97 @@ def _coverage(trials: int) -> list[Check]:
     out += _greenhall_against_truth(ensembles, trials, truth_se)
     out.append(_h_alpha_round_trip(ensembles, trials))
     out.append(_decomposition_round_trip(trials))
+    out.append(_bench_hat_round_trip())
     return out
+
+
+def _bench_hat_round_trip() -> Check:
+    """Three known oscillators in, three recovered variances out.
+
+    The N-cornered hat's whole claim is that it separates what a single
+    measurement cannot: a pair record sees `h_i + h_j` and no amount of
+    averaging splits it. Three pair records containing an odd cycle do
+    split it, and this measures how well.
+
+    Deliberately built with levels that differ by 30x, because the hat's
+    known weakness is the *quietest* source -- there it is a small
+    difference of large numbers and the estimate can go negative. Scoring
+    only the two louder ones would flatter the method; the quietest is
+    reported separately rather than dropped.
+    """
+    from ..bench import Bench, Channel, Device, Measurement, Source
+    from ..bench.graph import design_matrix
+    from ..bench.solve import solve
+    from ..stats.edof import edof
+
+    h = {"A": 4.0e-24, "B": 1.0e-24, "C": 9.0e-24}
+    rng = np.random.default_rng(SEEDS["coverage"] + 900)
+    y = {k: power_law_freq(8192, 0, rate_hz=1.0, rng=rng, h_alpha=v).y
+         for k, v in h.items()}
+    pairs = (("A", "B"), ("B", "C"), ("C", "A"))
+    results = {
+        f"m{i}": oadev(FreqSeries(y[a] - y[b], rate_hz=1.0), taus="octave")
+        for i, (a, b) in enumerate(pairs)
+    }
+    bench = Bench(
+        sources=tuple(Source(id=s) for s in "ABC"),
+        devices=(Device(id="D1", channels=(Channel(id="A-1", floor=0.0),)),),
+        measurements=tuple(
+            Measurement(id=f"m{i}", channel_id="A-1", source_a=a, source_b=b)
+            for i, (a, b) in enumerate(pairs)
+        ),
+    )
+    sol = solve(bench, results)
+
+    # The tolerance is propagated, not chosen. Each measured variance has
+    # Var(sigma2_hat) = 2 sigma^4 / eta, so the solution's covariance is
+    # A+ diag(...) A+^T -- and for a source far quieter than its partners
+    # that predicts a large relative error, because the hat is then a small
+    # difference of large numbers. Scoring the quiet source against the
+    # same flat percentage as the loud ones would be scoring the choice of
+    # oscillators rather than the method.
+    a, _sources, _channels, _known = design_matrix(bench)
+    pinv = np.linalg.pinv(a)
+    near = sol.tau_s <= 64.0
+    worst_ratio, per = 0.0, []
+    for name in "ABC":
+        col = sol.sources.index(name)
+        truth = h[name] / (2.0 * sol.tau_s)
+        got = sol.source_var[:, col]
+        predicted = np.zeros(sol.tau_s.size)
+        for k in range(sol.tau_s.size):
+            var_b = []
+            for i, mid in enumerate(("m0", "m1", "m2")):
+                r = results[mid]
+                eta, _ = edof(r.coeffs[k], int(r.af[k]), r.span_factor)
+                var_b.append(2.0 * r.var[k] ** 2 / max(eta, 1.0))
+            cov = pinv @ np.diag(var_b) @ pinv.T
+            predicted[k] = np.sqrt(cov[col, col])
+        # How many of its own predicted standard errors is it out by?
+        sigmas = np.abs(got[near] - truth[near]) / predicted[near]
+        worst_ratio = max(worst_ratio, float(np.max(sigmas)))
+        rel = float(np.max(np.abs(got[near] / truth[near] - 1.0)))
+        expect = float(np.max(predicted[near] / truth[near]))
+        per.append(f"{name} ({h[name]:.0e}): {rel:.0%} against {expect:.0%} predicted")
+
+    bound = 3.0
+    return Check(
+        "coverage", "N-cornered hat recovers three known oscillators",
+        "Three independent white-FM sources at known h_alpha, measured "
+        "pairwise, solved as one non-negative least-squares system per tau. "
+        "The truth is the closed form h/(2 tau), not a value taken from the "
+        "fit, so this measures the method rather than its self-consistency. "
+        "It is also the claim no single measurement can support: one pair "
+        "record sees h_i + h_j and cannot split it.",
+        f"within {bound:.0f} standard errors, where the standard error is "
+        "propagated through the solve from each row's own EDOF rather than "
+        "chosen. The levels differ by 30x on purpose: for the quietest "
+        "source the hat is a small difference of large numbers, and its "
+        "predicted error is correspondingly large. A flat percentage would "
+        "score the choice of oscillators instead of the method.",
+        f"worst {worst_ratio:.1f} sigma; per source " + ", ".join(per),
+        worst_ratio < bound,
+    )
 
 
 def _decomposition_round_trip(trials: int) -> Check:
