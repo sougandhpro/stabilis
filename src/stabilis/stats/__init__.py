@@ -7,6 +7,7 @@ from .core import Shape, StabilityResult
 from .edof import edof, eta1, eta3
 from .greenhall import greenhall_edof, greenhall_edof_pooled
 from .noiseid import NoiseID, identify, identify_curve
+from .powerlaw import PowerLawFit, decompose
 
 __all__ = [
     "Shape",
@@ -30,4 +31,6 @@ __all__ = [
     "identify_curve",
     "deviation_bias_factor",
     "unbias_deviation",
+    "PowerLawFit",
+    "decompose",
 ]

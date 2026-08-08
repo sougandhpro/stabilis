@@ -50,6 +50,7 @@ from ..reference import (
 )
 from ..stats import ONE_SIGMA, TWO_SIGMA, adev, confidence, mdev, oadev, ohdev, tdev
 from ..stats.bias import deviation_bias_factor
+from ..stats.core import StabilityResult
 from ..stats.edof import eta1
 from ..stats.greenhall import greenhall_edof
 from ..synth import _kasdin_walter_impulse, _unit_h_alpha, power_law_freq
@@ -500,7 +501,67 @@ def _coverage(trials: int) -> list[Check]:
     ))
     out += _greenhall_against_truth(ensembles, trials, truth_se)
     out.append(_h_alpha_round_trip(ensembles, trials))
+    out.append(_decomposition_round_trip(trials))
     return out
+
+
+def _decomposition_round_trip(trials: int) -> Check:
+    """Generate a known h_alpha, decompose the measured curve, compare.
+
+    The end-to-end claim for the power-law fit: not that it inverts its own
+    design matrix -- a test does that at 1e-8 -- but that the whole chain
+    holds, from the IEEE 1139 coefficient through the synthesizer, the
+    estimators, the conversion coefficients and the constrained solve, back
+    to the same number.
+
+    Only the three `f_h`-free power laws are scored. The two PM rows depend
+    on a bandwidth that is not identifiable from tau-domain data, and the
+    synthesizer's flicker PM is not brick-wall limited, so scoring them
+    here would measure that known offset rather than this fit. It is
+    recorded in VALIDATION-DEBT.md instead of being quietly averaged in.
+    """
+    from ..stats.powerlaw import decompose
+
+    tau0, h_true, n = 1.0, 5.0e-24, 4096
+    reps = max(trials // 8, 40)
+    worst, seen = 0.0, []
+    for alpha in (0, -1, -2):
+        rng = np.random.default_rng(SEEDS["coverage"] + 500 + alpha)
+        acc_a = acc_m = None
+        for _ in range(reps):
+            fs = power_law_freq(n, alpha, rate_hz=1.0 / tau0, rng=rng,
+                                h_alpha=h_true)
+            ra, rm = oadev(fs, taus="octave"), mdev(fs, taus="octave")
+            acc_a = ra.var if acc_a is None else acc_a + ra.var
+            acc_m = rm.var if acc_m is None else acc_m + rm.var
+        keep = (ra.af >= 4) & (ra.af <= n // 32)
+        curves = [
+            StabilityResult(kind=r.kind, af=r.af[keep], tau_s=r.tau_s[keep],
+                            var=(acc / reps)[keep], n_terms=r.n_terms[keep],
+                            rate_hz=r.rate_hz, provenance=r.provenance,
+                            shape=r.shape)
+            for r, acc in ((ra, acc_a), (rm, acc_m))
+        ]
+        got = decompose(curves, f_h=0.5 / tau0, weights="none").h[alpha]
+        seen.append(f"alpha={alpha}: {got / h_true:.3f}")
+        worst = max(worst, abs(got / h_true - 1.0))
+
+    bound = 0.20
+    return Check(
+        "coverage", "power-law decomposition recovers a known h_alpha",
+        "Synthetic noise generated at a known IEEE 1139 coefficient, "
+        "estimated with oadev and mdev, and decomposed. Closes the loop that "
+        "the conversion coefficients, the calibrated synthesizer and the "
+        "non-negative solve all sit on -- no step of which is checked by "
+        f"this measurement alone. Averaged over {reps} realizations per "
+        "power law at N=4096.",
+        f"within {bound:.0%} of the generated level for white FM, flicker FM "
+        "and random-walk FM. The two PM rows are excluded because their "
+        "coefficients depend on a bandwidth that tau-domain data cannot "
+        "identify -- see VALIDATION-DEBT.md item 2.",
+        f"recovered/true {'; '.join(seen)}",
+        worst < bound,
+    )
 
 
 def _h_alpha_round_trip(ensembles, trials: int) -> Check:
