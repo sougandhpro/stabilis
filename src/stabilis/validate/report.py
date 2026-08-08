@@ -51,6 +51,7 @@ from ..reference import (
 from ..stats import ONE_SIGMA, TWO_SIGMA, adev, confidence, mdev, oadev, ohdev, tdev
 from ..stats.bias import deviation_bias_factor
 from ..stats.edof import eta1
+from ..stats.greenhall import greenhall_edof
 from ..synth import power_law_freq
 from ..types import FreqSeries, PhaseSeries
 from .certified import (
@@ -441,7 +442,72 @@ def _coverage(trials: int) -> list[Check]:
         f"worst deviation {worst:.0%} over m = 1..16",
         worst < bound,
     ))
+    out += _greenhall_against_truth(ensembles, trials, truth_se)
     return out
+
+
+def _greenhall_against_truth(ensembles, trials: int, truth_se: float) -> list[Check]:
+    """The model-based EDOF measured the same way eta1 is, and compared to it.
+
+    Two checks, deliberately separate. The first asks whether Greenhall's
+    algorithm predicts the sampling variance it claims to. The second asks
+    what its assumption costs against an estimator that makes none -- and
+    that is the whole argument for the default this library ships, so it is
+    measured rather than asserted in prose.
+    """
+    worst_model, worst_gap, at_m1 = 0.0, 0.0, {}
+    for alpha, (runs, _) in ensembles.items():
+        v = np.array([r.var for r in runs])
+        eta_true = 2.0 * v.mean(axis=0) ** 2 / v.var(axis=0)
+        first = runs[0]
+        for i, af in enumerate(first.af.tolist()):
+            eta = greenhall_edof(alpha, first.shape.d, af, 513,
+                                 first.shape.modified, first.shape.overlapped)
+            if af == 1:
+                at_m1[alpha] = eta / eta_true[i]
+                continue
+            if af > 512 // 32:
+                continue
+            worst_model = max(worst_model, abs(eta / eta_true[i] - 1.0))
+            data_driven = float(np.median([eta1(r.coeffs[i], af) for r in runs]))
+            worst_gap = max(worst_gap, abs(eta / data_driven - 1.0))
+
+    bound = float(np.hypot(0.20, 4.0 * truth_se))
+    span = ", ".join(f"alpha={a}: {r:.2f}" for a, r in sorted(at_m1.items()))
+    return [
+        Check(
+            "coverage", "Greenhall EDOF against Monte-Carlo truth",
+            "The same definitional measurement applied to the model-based "
+            "algorithm: it is told the power law and the record geometry, "
+            "never shown the data, and its answer is compared to "
+            "2 sigma^4 / Var(sigma_hat^2) measured over the ensemble. This is "
+            "the only correctness evidence for the Stable32 parity path that "
+            "does not itself come from Stable32.",
+            f"within {bound:.0%} for m = 2..16, being 20% for the model "
+            f"combined in quadrature with four standard errors of the "
+            f"Monte-Carlo truth ({truth_se:.0%} at {trials} trials). Wider "
+            "than eta1's band because two approximations are being compared, "
+            "not one estimate against a truth.",
+            f"worst deviation {worst_model:.0%} over m = 2..16",
+            worst_model < bound,
+        ),
+        Check(
+            "coverage", "what assuming a power law costs, measured",
+            "Greenhall against eta1 on the same realizations. They answer "
+            "different questions -- one is told the noise type, the other "
+            "reads the data -- so this is not a correctness check on either. "
+            "It is the honest statement of the trade the user is making, and "
+            "the reason `auto` never selects the model-based route.",
+            "the two agree within 40% for m = 2..16 across white PM, white FM "
+            "and random-walk FM. At m = 1 they diverge sharply and by design: "
+            "the paper models phase as a difference of a band-unlimited power "
+            "law, so its noise is not flat to Nyquist. The ratios there are "
+            f"reported rather than bounded.",
+            f"worst disagreement {worst_gap:.0%} for m = 2..16; "
+            f"greenhall/eta1 at m = 1 is {span}",
+            worst_gap < 0.40,
+        ),
+    ]
 
 
 def _interop() -> list[Check]:

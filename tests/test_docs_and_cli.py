@@ -180,3 +180,75 @@ def test_cli_json_carries_the_edof_and_the_method(tmp_path, capsys):
     assert set(ci["edof_method"]) <= {"eta1", "eta3"}
     actions = [s["action"] for s in payload["provenance"]["steps"]]
     assert "confidence" in actions
+
+
+def test_cli_greenhall_prints_the_alpha_column(tmp_path, capsys):
+    """With an assumed power law the table gains Stable32's Alpha column.
+
+    That completes the layout a migrating user diffs against: AF, Tau, #,
+    Alpha, Min Sigma, Sigma, Max Sigma.
+    """
+    p = _noise_file(tmp_path, n=2048)
+    assert main([
+        "oadev", str(p), "--kind", "frequency", "--rate", "1",
+        "--edof-method", "greenhall", "--alpha", "0",
+    ]) == 0
+    out = capsys.readouterr().out
+    assert "Alpha" in out and "an assumed power law" in out
+    body = [ln for ln in out.splitlines() if not ln.startswith(("#", " " * 5 + "AF"))]
+    for line in body:
+        af, tau, n, a, lo, dev, hi, eta, via = line.split()
+        assert via == "greenhall" and a == "0"
+        assert float(lo) <= float(dev) <= float(hi)
+
+
+def test_cli_without_greenhall_has_no_alpha_column(tmp_path, capsys):
+    """The default assumes nothing, so it must not print an assumption."""
+    p = _noise_file(tmp_path)
+    assert main(["oadev", str(p), "--kind", "frequency", "--rate", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "Alpha" not in out
+    assert "data-driven EDOF" in out
+
+
+def test_cli_greenhall_says_where_it_declined(tmp_path, capsys):
+    """A fallen-back row must be visible in the table and explained below it."""
+    p = _noise_file(tmp_path, n=1024)
+    assert main([
+        "oadev", str(p), "--kind", "frequency", "--rate", "1",
+        "--edof-method", "greenhall",
+    ]) == 0
+    out = capsys.readouterr().out
+    assert "declined greenhall where" in out
+    assert "eta1" in out
+
+
+def test_cli_compare_edof_puts_the_methods_side_by_side(tmp_path, capsys):
+    """The diagnostic that makes the design argument checkable by the user."""
+    p = _noise_file(tmp_path, n=2048)
+    assert main(["compare-edof", str(p), "--kind", "frequency", "--rate", "1"]) == 0
+    out = capsys.readouterr().out
+    for column in ("eta1", "eta3", "greenhall", "Alpha", "width g/1"):
+        assert column in out
+    body = [ln for ln in out.splitlines() if not ln.startswith(("#", " " * 5 + "AF"))]
+    assert body
+    for line in body:
+        # Counted from the right, because the Alpha cell is blank on a row
+        # where the model-based route declined.
+        fields = line.split()
+        eta1_v, eta3_v, gh = float(fields[-5]), float(fields[-4]), float(fields[-3])
+        # eta3 counts non-overlapping windows and is a deliberate lower bound.
+        assert eta3_v <= eta1_v and eta3_v <= gh
+
+
+def test_cli_compare_edof_json_carries_every_method(tmp_path, capsys):
+    p = _noise_file(tmp_path, n=1024)
+    assert main([
+        "compare-edof", str(p), "--kind", "frequency", "--rate", "1",
+        "--alpha", "0", "--json",
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload["edof"]) == {"eta1", "eta3", "greenhall"}
+    assert payload["alpha"] == [0] * len(payload["af"])
+    assert len(payload["dev_lo"]["greenhall"]) == len(payload["af"])
+    assert payload["provenance"]["steps"]

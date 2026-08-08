@@ -33,6 +33,7 @@ from ..log import record
 from ..provenance import Provenance
 from .core import StabilityResult
 from .edof import EDOF_METHODS, edof
+from .greenhall import GREENHALL_RUN_POLICIES, greenhall_edof_pooled
 
 __all__ = ["Confidence", "confidence", "chi2_interval", "ONE_SIGMA", "TWO_SIGMA"]
 
@@ -74,6 +75,13 @@ class Confidence:
     var_hi: np.ndarray
     method: tuple[str, ...]
     provenance: Provenance
+    # The power law assumed at each tau, when one was assumed at all. None
+    # for the data-driven methods, which is the whole point of them.
+    alpha: np.ndarray | None = None
+    # Per tau, why the requested method was not the one used -- empty
+    # string where it was. A report has to be able to answer "why is this
+    # row different", and "it silently fell back" is not an answer.
+    declined: tuple[str, ...] = ()
 
     @property
     def dev_lo(self) -> np.ndarray:
@@ -85,10 +93,103 @@ class Confidence:
         return np.sqrt(self.var_hi)
 
 
+# Averaged frequency points below which the lag-1 autocorrelation is not
+# worth believing. Its standard error is about 1/sqrt(n), so at n = 30 that
+# is 0.18 -- already comparable to the 0.25 threshold noiseid uses to
+# decide whether to difference again. Below that the identification is a
+# coin toss, and a coin toss fed to Greenhall produces a confident error
+# bar from nothing. Measured symptom: at N = 1000, m = 128 the identifier
+# returned white PM for white FM data and the EDOF jumped from 43 to 420.
+MIN_POINTS_FOR_NOISE_ID = 30
+
+# Outside the -4..2 range every noise-ID method works in, so it can never
+# collide with a real answer.
+_UNIDENTIFIED = 99
+
+
+def alpha_per_tau(result: StabilityResult, alpha=None, series=None) -> np.ndarray:
+    """The power law to assume at each averaging factor of `result`.
+
+    Either given -- as one integer for the whole curve, or one per tau --
+    or identified from the data, which is what Stable32's `Alpha` column
+    does. Noise type is a function of tau, not of a record, so the
+    identified route runs per averaging factor rather than once.
+
+    **To reproduce a Stable32 run exactly, pass its `Alpha` column.** The
+    identified route deliberately refuses where Stable32 would answer: past
+    `MIN_POINTS_FOR_NOISE_ID` averaged points there is not enough data to
+    tell the power laws apart, and this library declines rather than
+    guessing. Those points come back with a sentinel and the caller falls
+    back to the data-driven EDOF, which needs no noise type at all.
+    """
+    from .noiseid import identify_curve
+
+    if alpha is not None:
+        out = np.broadcast_to(np.asarray(alpha, dtype=np.int64), result.af.shape)
+        return np.array(out)
+    if series is None:
+        raise ValueError(
+            "confidence: method='greenhall' assumes a power law, so it needs "
+            "one. Pass alpha=<int or one per tau>, or series=<the data> to "
+            "identify it per tau"
+        )
+    ids = identify_curve(series, result.af)
+    n_freq = series.n - 1 if hasattr(series, "x") else series.n
+    return np.asarray(
+        [
+            _UNIDENTIFIED
+            if n is None or n_freq // int(m) < MIN_POINTS_FOR_NOISE_ID
+            else n.alpha
+            for m, n in zip(result.af.tolist(), ids)
+        ],
+        dtype=np.int64,
+    )
+
+
+def _greenhall_etas(result, alphas, run_policy):
+    """EDOF per tau by the model-based route, with the reason where not.
+
+    Declines rather than guesses in three situations: the noise could not
+    be identified, the identified law is too steep for this estimator to
+    have a stationary difference of, or the record is segmented and the
+    caller asked for the strict reading. Each falls back to the
+    data-driven estimator and says so.
+    """
+    etas, used, declined = [], [], []
+    shape = result.shape
+    for i, m in enumerate(result.af.tolist()):
+        why = ""
+        if alphas[i] == _UNIDENTIFIED:
+            why = f"too few averaged points to identify the noise at m={m}"
+        else:
+            try:
+                eta, how = greenhall_edof_pooled(
+                    int(alphas[i]), shape.d, m, result.run_lengths, result.run_terms[i],
+                    shape.modified, shape.overlapped, run_policy,
+                )
+            except ValueError as exc:
+                why = str(exc).removeprefix("greenhall: ").split(";")[0]
+            else:
+                if how == "greenhall":
+                    etas.append(eta)
+                    used.append(how)
+                    declined.append("")
+                    continue
+                why = f"record is in {len(result.run_lengths)} runs, policy is 'fallback'"
+        eta, how = edof(result.coeffs[i], m, result.span_factor, "auto")
+        etas.append(eta)
+        used.append(how)
+        declined.append(why)
+    return etas, used, declined
+
+
 def confidence(
     result: StabilityResult,
     level: float = ONE_SIGMA,
     method: str = "auto",
+    alpha=None,
+    series=None,
+    run_policy: str = "pool",
 ) -> Confidence:
     """Confidence interval for every tau of a stability result.
 
@@ -97,24 +198,46 @@ def confidence(
     contract from core.py doing its job: one implementation here serves
     every estimator, present and future, because they all report the array
     they averaged.
+
+    `method="greenhall"` is the Stable32 parity path and the only one that
+    assumes a power law; `alpha` and `series` are how that assumption gets
+    supplied, and both the assumed law and any point where the method was
+    declined come back on the result and go into provenance. `auto` never
+    selects it -- see edof.py.
     """
     if method not in EDOF_METHODS:
         raise ValueError(f"method must be one of {EDOF_METHODS}, got {method!r}")
+    if run_policy not in GREENHALL_RUN_POLICIES:
+        raise ValueError(
+            f"run_policy must be one of {GREENHALL_RUN_POLICIES}, got {run_policy!r}"
+        )
     if len(result.coeffs) != result.af.size:
         raise ValueError(
             f"{result.kind}: confidence needs the coefficient arrays; "
             "the estimator was called with keep_coeffs=False"
         )
 
-    etas, used = [], []
-    for m, c in zip(result.af, result.coeffs):
-        eta, how = edof(c, int(m), result.span_factor, method)
-        etas.append(eta)
-        used.append(how)
+    alphas = None
+    if method == "greenhall":
+        if result.shape is None:
+            raise ValueError(
+                f"{result.kind}: this estimator declares no Shape, so the "
+                "model-based EDOF cannot know its difference order. Use "
+                "method='auto'"
+            )
+        alphas = alpha_per_tau(result, alpha, series)
+        etas, used, declined = _greenhall_etas(result, alphas, run_policy)
+    else:
+        etas, used = [], []
+        for m, c in zip(result.af, result.coeffs):
+            eta, how = edof(c, int(m), result.span_factor, method)
+            etas.append(eta)
+            used.append(how)
+        declined = [""] * len(etas)
 
     eta = np.asarray(etas, dtype=np.float64)
     lo, hi = chi2_interval(result.var, eta, level)
-    fell_back = sum(1 for h, m in zip(used, result.af) if h != method and method != "auto")
+    fell_back = sum(1 for h in used if h != method and method != "auto")
     prov = record(
         result.provenance,
         "stats.ci",
@@ -125,6 +248,9 @@ def confidence(
             "methods_used": sorted(set(used)),
             "edof_min": float(eta.min()),
             "edof_max": float(eta.max()),
+            "alpha_assumed": None if alphas is None else alphas.tolist(),
+            "run_policy": run_policy if method == "greenhall" else None,
+            "declined": sorted({d for d in declined if d}),
         },
         f"{eta.size} intervals" + (f", {fell_back} fell back" if fell_back else ""),
     )
@@ -135,4 +261,6 @@ def confidence(
         var_hi=hi,
         method=tuple(used),
         provenance=prov,
+        alpha=alphas,
+        declined=tuple(declined),
     )

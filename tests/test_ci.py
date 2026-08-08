@@ -131,6 +131,17 @@ def test_confidence_needs_the_coefficients_and_says_so():
 
 def test_confidence_rejects_an_unknown_method():
     with pytest.raises(ValueError, match="method must be one of"):
+        confidence(_result(), method="clairvoyance")
+
+
+def test_greenhall_will_not_invent_a_power_law():
+    """It is the one method that assumes a noise type, so it must be given one.
+
+    Defaulting to white FM here would be the single most damaging silent
+    assumption this library could make: the error bar would look computed
+    and would be a guess.
+    """
+    with pytest.raises(ValueError, match="assumes a power law"):
         confidence(_result(), method="greenhall")
 
 
@@ -197,3 +208,118 @@ def test_measured_coverage_across_every_power_law(alpha, level, name):
     lo, hi = (0.58, 0.80) if level == ONE_SIGMA else (0.88, 0.995)
     assert np.all(cov > lo), f"{name} alpha={alpha}: {dict(zip(af.tolist(), cov.tolist()))}"
     assert np.all(cov < hi), f"{name} alpha={alpha}: {dict(zip(af.tolist(), cov.tolist()))}"
+
+
+# --- the model-based route -----------------------------------------------
+
+
+def test_greenhall_accepts_one_alpha_or_one_per_tau():
+    """A single power law for the whole curve, or Stable32's Alpha column.
+
+    The per-tau form is how a migrating user reproduces an existing run
+    exactly: paste in the Alpha column, get the Min/Max Sigma columns.
+    """
+    r = _result()
+    flat = confidence(r, method="greenhall", alpha=0)
+    per_tau = confidence(r, method="greenhall", alpha=[0] * r.af.size)
+    assert np.array_equal(flat.edof, per_tau.edof)
+    assert flat.alpha.tolist() == [0] * r.af.size
+    assert set(flat.method) == {"greenhall"}
+    assert not any(flat.declined)
+
+
+def test_greenhall_identifies_the_noise_per_tau_when_asked_to():
+    """Noise type is a function of tau, not of a record.
+
+    On synthesized white FM the identifier should say so wherever the
+    averaged series is long enough to tell, and the assumed law is carried
+    on the result so a report can print it.
+
+    "Long enough" is taken here as 100 averaged points, well above the 30
+    the guard enforces. Between the two the identifier is allowed to be
+    wrong by a power law on a single realization, and is -- at 32 averaged
+    points this record reads flicker FM. That is honest behaviour for one
+    realization, not a defect, which is why the assertion is scoped to
+    where the data actually supports an answer.
+    """
+    rng = np.random.default_rng(4)
+    series = power_law_freq(2048, 0, rate_hz=1.0, rng=rng)
+    r = oadev(series, taus="octave")
+    c = confidence(r, method="greenhall", series=series)
+    identified = [
+        a for a, m, af in zip(c.alpha.tolist(), c.method, r.af.tolist())
+        if m == "greenhall" and series.n // af >= 100
+    ]
+    assert identified and all(a == 0 for a in identified)
+
+
+def test_greenhall_declines_rather_than_guessing_at_long_tau():
+    """Past MIN_POINTS_FOR_NOISE_ID the identification is a coin toss.
+
+    Stable32 answers here anyway. This library falls back to the
+    data-driven EDOF and records why, because a confident error bar
+    derived from a coin toss is worse than a wider honest one. The symptom
+    this prevents is real: before the guard, white FM at N=1000, m=128 was
+    identified as white PM and the EDOF jumped from 43 to 420.
+    """
+    rng = np.random.default_rng(6)
+    series = power_law_freq(1000, 0, rate_hz=1.0, rng=rng)
+    r = oadev(series, taus="octave")
+    c = confidence(r, method="greenhall", series=series)
+    assert "eta1" in c.method, "nothing was declined; the guard did nothing"
+    for i, why in enumerate(c.declined):
+        if why:
+            assert "identify the noise" in why
+            assert c.method[i] != "greenhall"
+    # The one thing that must never happen: a jump in EDOF as tau grows.
+    assert all(b <= a for a, b in zip(c.edof, c.edof[1:]))
+
+
+def test_greenhall_declines_a_noise_too_steep_for_the_estimator():
+    """alpha = -3 has no stationary second difference, so oadev cannot see it.
+
+    The right answer is not a number. It falls back, and the reason names
+    the restriction so the user knows to reach for ohdev.
+    """
+    r = _result()
+    c = confidence(r, method="greenhall", alpha=-3)
+    assert set(c.method) <= {"eta1", "eta3"}
+    assert all("alpha + 2d > 1" in why for why in c.declined)
+
+
+def test_greenhall_records_the_assumption_in_provenance():
+    """An ISO-17025 report has to be able to say which power law it assumed."""
+    r = _result()
+    c = confidence(r, method="greenhall", alpha=-1)
+    step = c.provenance.steps[-1]
+    assert step.params["method_requested"] == "greenhall"
+    assert step.params["alpha_assumed"] == [-1] * r.af.size
+    assert step.params["run_policy"] == "pool"
+
+
+def test_data_driven_methods_assume_no_power_law_at_all():
+    """The negative claim, asserted: `auto` never records an alpha.
+
+    This is the product claim in one line. If `auto` ever started
+    resolving to the model-based route, this fails.
+    """
+    c = confidence(_result(), method="auto")
+    assert c.alpha is None
+    assert set(c.method) <= {"eta1", "eta3"}
+    assert c.provenance.steps[-1].params["alpha_assumed"] is None
+
+
+def test_greenhall_pools_or_declines_a_gapped_record():
+    """Both policies reach the caller, and they differ where they should."""
+    rng = np.random.default_rng(9)
+    y = power_law_freq(1024, 0, rate_hz=1.0, rng=rng).y.copy()
+    y[400:405] = np.nan
+    series = FreqSeries(y=y, rate_hz=1.0)
+    r = oadev(series, taus="octave")
+    pooled = confidence(r, method="greenhall", alpha=0, run_policy="pool")
+    strict = confidence(r, method="greenhall", alpha=0, run_policy="fallback")
+    assert "greenhall" in pooled.method
+    assert "greenhall" not in strict.method
+    assert all("'fallback'" in why for why in strict.declined)
+    with pytest.raises(ValueError, match="run_policy must be one of"):
+        confidence(r, method="greenhall", alpha=0, run_policy="hope")

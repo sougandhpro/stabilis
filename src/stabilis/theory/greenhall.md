@@ -225,6 +225,37 @@ The caption in the source reads "FLFM (α = 1)", but §4.6.3 and the input
 table both name α = 1 as **FLPM**. Recorded, not corrected — the numbers
 are used as printed.
 
+## Where α comes from
+
+Two routes, and the difference matters.
+
+**Given.** `--alpha`, or `alpha=` on `confidence`, as one value or one per
+tau. **To reproduce a Stable32 run exactly, paste in its `Alpha` column.**
+That is the parity path and it assumes nothing beyond what the user asked
+for.
+
+**Identified.** Pass the series instead and the noise is identified per
+averaging factor by `noiseid`, which is what Stable32's `Alpha` column
+itself is. Noise type is a function of tau, not of a record, so this runs
+per averaging factor rather than once.
+
+The identified route **declines where Stable32 answers.** Past
+`MIN_POINTS_FOR_NOISE_ID = 30` averaged frequency points the lag-1
+autocorrelation has a standard error of about `1/√n ≈ 0.18`, already
+comparable to the 0.25 threshold `noiseid` uses to decide whether to
+difference again — so the answer is close to a coin toss, and a coin toss
+fed to this algorithm produces a confident error bar out of nothing. The
+symptom is not hypothetical: before the guard, white FM at N = 1000 and
+m = 128 was identified as white PM and the EDOF jumped from 43 to 420,
+which is an error bar roughly three times too narrow at the longest tau on
+the plot.
+
+Declined points fall back to η₁, and the reason is carried per tau on
+`Confidence.declined`, printed under the table, and recorded in
+provenance. The same happens when the identified law is too steep for the
+estimator to have a stationary difference of — α = −3 with `oadev` — where
+the reason names the restriction so the user knows to reach for `ohdev`.
+
 ## Records with gaps
 
 The algorithm assumes one contiguous record of `N` samples. `phase_runs`

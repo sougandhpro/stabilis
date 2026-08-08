@@ -28,9 +28,22 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["eta1", "eta3", "edof", "EDOF_METHODS", "MIN_TERMS_FOR_ETA1"]
+__all__ = [
+    "eta1",
+    "eta3",
+    "edof",
+    "EDOF_METHODS",
+    "DATA_DRIVEN_METHODS",
+    "MIN_TERMS_FOR_ETA1",
+]
 
-EDOF_METHODS = ("auto", "eta1", "eta3")
+# "greenhall" is dispatched by stats.ci, not here: it is a function of the
+# noise type and the record geometry rather than of the coefficients, so it
+# shares none of this module's inputs. It is listed here because this tuple
+# is the single source of truth for what a caller -- and the CLI -- may ask
+# for. `auto` deliberately never resolves to it; see the module docstring.
+EDOF_METHODS = ("auto", "eta1", "eta3", "greenhall")
+DATA_DRIVEN_METHODS = ("auto", "eta1", "eta3")
 
 # Below this many terms the sample autocorrelation is mostly noise and eta1
 # stops being informative -- it can even exceed M. Fall back to eta3, which
@@ -158,8 +171,17 @@ def edof(
     has to be able to answer for, so the caller records it rather than
     discovering it later.
     """
-    if method not in EDOF_METHODS:
-        raise ValueError(f"edof: method must be one of {EDOF_METHODS}, got {method!r}")
+    if method == "greenhall":
+        raise ValueError(
+            "edof: 'greenhall' is not a coefficient-based estimator; it needs "
+            "the noise type and the record geometry. Call "
+            "stats.greenhall.greenhall_edof, or stats.ci.confidence with "
+            "method='greenhall'"
+        )
+    if method not in DATA_DRIVEN_METHODS:
+        raise ValueError(
+            f"edof: method must be one of {DATA_DRIVEN_METHODS}, got {method!r}"
+        )
     n_terms = int(np.asarray(coeffs).size)
     if method == "eta3":
         return eta3(n_terms, m, span_factor), "eta3"

@@ -200,6 +200,17 @@ def test_edof_reports_the_method_it_actually_used():
 
 def test_edof_rejects_an_unknown_method():
     with pytest.raises(ValueError, match="method must be one of"):
+        edof(np.arange(50.0), m=1, method="clairvoyance")
+
+
+def test_edof_points_greenhall_at_its_own_module():
+    """`greenhall` is a valid method for the library but not for this function.
+
+    It is a function of the noise type and the record geometry, not of the
+    coefficients, so it shares none of this dispatcher's inputs. The error
+    names where to go rather than pretending the method does not exist.
+    """
+    with pytest.raises(ValueError, match="not a coefficient-based estimator"):
         edof(np.arange(50.0), m=1, method="greenhall")
 
 
