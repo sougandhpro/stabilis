@@ -40,7 +40,7 @@ from ..provenance import Provenance
 from ..tau import averaging_factors, taus_from_afs
 from ..types import FreqSeries, PhaseSeries, phase_from_frequency, to_phase
 
-__all__ = ["StabilityResult", "phase_runs", "run_estimator", "GAP_POLICIES"]
+__all__ = ["Shape", "StabilityResult", "phase_runs", "run_estimator", "GAP_POLICIES"]
 
 # How a gap is allowed to affect the terms around it.
 #
@@ -55,6 +55,26 @@ __all__ = ["StabilityResult", "phase_runs", "run_estimator", "GAP_POLICIES"]
 #              whose origin may have moved.
 # "auto"    -- "segment" for frequency, "mask" for phase.
 GAP_POLICIES = ("auto", "mask", "segment")
+
+
+@dataclass(frozen=True)
+class Shape:
+    """What kind of finite difference an estimator is, structurally.
+
+    Three facts that no other field on the result can supply. `span_factor`
+    cannot: `mdev` has span 3 but differences twice, while `ohdev` has span
+    3 and differences three times. `kind` cannot either, without a lookup
+    table that a new estimator would silently fall out of.
+
+    They exist because the model-based EDOF (see greenhall.py) is a
+    function of exactly this triple plus the noise type -- `d` sets the
+    difference operator, `modified` sets the filter factor F, and
+    `overlapped` sets the stride factor S.
+    """
+
+    d: int
+    modified: bool
+    overlapped: bool
 
 
 @dataclass(frozen=True)
@@ -75,6 +95,18 @@ class StabilityResult:
     # the estimator's algebraic limit and also what sets the conservative
     # EDOF, so it is carried rather than re-derived from `kind`.
     span_factor: int = 2
+    # The same principle, for the model-based EDOF. `None` means the
+    # estimator has not declared itself, and the Greenhall path refuses
+    # rather than guessing -- a wrong default here would be a wrong error
+    # bar, silently.
+    shape: Shape | None = None
+    # Phase samples in each contiguous run, and how many terms each run
+    # actually contributed at each averaging factor. Both are needed to
+    # pool a model-based EDOF over a gapped record: the first because the
+    # model is a function of the record length, the second because a
+    # masked gap removes terms in a way no formula recovers.
+    run_lengths: tuple[int, ...] = ()
+    run_terms: tuple[np.ndarray, ...] = ()
 
     @property
     def dev(self) -> np.ndarray:
@@ -158,6 +190,7 @@ def run_estimator(
     hard_limit_divisor: int = 2,
     keep_coeffs: bool = True,
     gap_policy: str = "auto",
+    shape: Shape | None = None,
 ) -> StabilityResult:
     """Evaluate `coeff_fn` over a tau grid and assemble the result.
 
@@ -193,16 +226,20 @@ def run_estimator(
             f"gap-free run {longest} (algebraic limit m <= {hard_limit})"
         )
 
-    var, counts, coeff_list, kept = [], [], [], []
+    var, counts, coeff_list, kept, per_run = [], [], [], [], []
     for m in afs:
+        # Drop the gap-spoiled terms per run before pooling, not after, so
+        # the surviving count is known run by run. Concatenation order and
+        # the pooled array itself are unchanged either way.
         parts = [coeff_fn(r, int(m), tau0) for r in runs]
+        parts = [p[np.isfinite(p)] for p in parts]
         c = parts[0] if len(parts) == 1 else np.concatenate(parts)
-        c = c[np.isfinite(c)]
         if c.size == 0:
             continue
         var.append(scale * float(np.mean(c**2)))
         counts.append(int(c.size))
         kept.append(int(m))
+        per_run.append(np.asarray([p.size for p in parts], dtype=np.int64))
         if keep_coeffs:
             coeff_list.append(c)
 
@@ -234,4 +271,7 @@ def run_estimator(
         scale=scale,
         coeffs=tuple(coeff_list),
         span_factor=hard_limit_divisor,
+        shape=shape,
+        run_lengths=tuple(int(r.size) for r in runs),
+        run_terms=tuple(per_run),
     )

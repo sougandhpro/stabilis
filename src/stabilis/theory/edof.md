@@ -27,8 +27,12 @@ wedge: **confidence intervals that do not require guessing the noise type
 first.**
 
 Greenhall's algorithm — the one that reproduces Stable32's `Min Sigma` and
-`Max Sigma` columns — is still needed for interoperability and arrives at
-M3. It is a parity feature, not the primary path.
+`Max Sigma` columns — is implemented, in `greenhall`. It is a parity
+feature, selected explicitly and never by `auto`, not the primary path.
+The two are directly comparable, and the comparison is instructive: at
+m = 1 the model-based answer is 17 % high for white FM and 24 % low for
+random-walk FM against the exact values, while η₁ reads both correctly off
+the data. See `greenhall` for the measurements.
 
 ## η₁ — from the coefficient autocorrelation
 
@@ -116,8 +120,9 @@ within ±10 % up to m = N/32 and within 0.6–1.5 everywhere; η₃ never exceed
 the truth; the FFT autocorrelation matches a direct sum; and the method
 used is reported. The end-to-end check is coverage, in `tests/test_ci.py`.
 
-**Not yet validated:** Greenhall EDOF (M3), which is what Stable32 parity
-needs.
+Greenhall EDOF has its own page and its own suite,
+`tests/test_greenhall.py`. What remains unvalidated there is agreement with
+actual Stable32 output, which needs a reference session.
 
 ## References
 

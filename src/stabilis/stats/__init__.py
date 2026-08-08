@@ -3,11 +3,13 @@
 from .bias import deviation_bias_factor, unbias_deviation
 from .ci import ONE_SIGMA, TWO_SIGMA, Confidence, confidence
 from .classical import adev, mdev, oadev, ohdev, tdev
-from .core import StabilityResult
+from .core import Shape, StabilityResult
 from .edof import edof, eta1, eta3
+from .greenhall import greenhall_edof, greenhall_edof_pooled
 from .noiseid import NoiseID, identify, identify_curve
 
 __all__ = [
+    "Shape",
     "StabilityResult",
     "adev",
     "oadev",
@@ -21,6 +23,8 @@ __all__ = [
     "edof",
     "eta1",
     "eta3",
+    "greenhall_edof",
+    "greenhall_edof_pooled",
     "NoiseID",
     "identify",
     "identify_curve",

@@ -18,7 +18,7 @@ import numpy as np
 
 from ..registry import register
 from ..types import FreqSeries, PhaseSeries
-from .core import StabilityResult, run_estimator
+from .core import Shape, StabilityResult, run_estimator
 
 __all__ = ["adev", "oadev", "mdev", "tdev", "ohdev"]
 
@@ -26,6 +26,16 @@ __all__ = ["adev", "oadev", "mdev", "tdev", "ohdev"]
 # no irrational divisor destroys exactness -- see core.py.
 SCALE_ALLAN = 0.5
 SCALE_HADAMARD = 1.0 / 6.0
+
+# Shape(d, modified, overlapped) -- the structural triple the model-based
+# EDOF needs. Note that `d` and `span_factor` are independent: mdev spans
+# 3m but differences twice, ohdev spans 3m and differences three times.
+# tdev is mdev rescaled by a deterministic factor, so it is structurally
+# identical and has the same degrees of freedom.
+SHAPE_OAVAR = Shape(d=2, modified=False, overlapped=True)
+SHAPE_AVAR = Shape(d=2, modified=False, overlapped=False)
+SHAPE_MVAR = Shape(d=2, modified=True, overlapped=True)
+SHAPE_OHVAR = Shape(d=3, modified=False, overlapped=True)
 
 
 def _coeffs_oavar(x: np.ndarray, m: int, tau0: float) -> np.ndarray:
@@ -129,7 +139,7 @@ def oadev(
     """Overlapping Allan deviation. See theory/avar.md."""
     return run_estimator(
         _coeffs_oavar, SCALE_ALLAN, "oadev", series, taus, max_af, 2,
-        keep_coeffs, gap_policy,
+        keep_coeffs, gap_policy, SHAPE_OAVAR,
     )
 
 
@@ -144,7 +154,7 @@ def adev(
     """Non-overlapping Allan deviation. See theory/avar.md."""
     return run_estimator(
         _coeffs_avar, SCALE_ALLAN, "adev", series, taus, max_af, 2,
-        keep_coeffs, gap_policy,
+        keep_coeffs, gap_policy, SHAPE_AVAR,
     )
 
 
@@ -159,7 +169,7 @@ def mdev(
     """Modified Allan deviation. See theory/mvar.md."""
     return run_estimator(
         _coeffs_mvar, SCALE_ALLAN, "mdev", series, taus, max_af, 3,
-        keep_coeffs, gap_policy,
+        keep_coeffs, gap_policy, SHAPE_MVAR,
     )
 
 
@@ -174,7 +184,7 @@ def tdev(
     """Time deviation, in seconds. See theory/tdev.md."""
     return run_estimator(
         _coeffs_tvar, SCALE_HADAMARD, "tdev", series, taus, max_af, 3,
-        keep_coeffs, gap_policy,
+        keep_coeffs, gap_policy, SHAPE_MVAR,
     )
 
 
@@ -189,5 +199,5 @@ def ohdev(
     """Overlapping Hadamard deviation. See theory/hvar.md."""
     return run_estimator(
         _coeffs_ohvar, SCALE_HADAMARD, "ohdev", series, taus, max_af, 3,
-        keep_coeffs, gap_policy,
+        keep_coeffs, gap_policy, SHAPE_OHVAR,
     )
