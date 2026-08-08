@@ -172,6 +172,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_pl.add_argument("--json", action="store_true", help="emit JSON")
     p_pl.set_defaults(func=_cmd_powerlaw)
 
+    p_plot = sub.add_parser("plot", help="plot a data file (needs matplotlib)")
+    _add_input_args(p_plot)
+    p_plot.add_argument(
+        "--draw", default="sigma-tau",
+        choices=("sigma-tau", "phase", "frequency"),
+        help="what to draw (default: sigma-tau). Distinct from --kind, "
+             "which says how to read the input file",
+    )
+    p_plot.add_argument(
+        "--estimator", default="oadev",
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev"),
+    )
+    p_plot.add_argument("--taus", default="octave", choices=MODES)
+    p_plot.add_argument("--max-af", type=int, help="largest averaging factor")
+    p_plot.add_argument(
+        "--confidence", type=float, default=ONE_SIGMA,
+        help="confidence level for the error bars (default: 1 sigma)",
+    )
+    p_plot.add_argument(
+        "--no-confidence", action="store_true", help="draw no error bars")
+    p_plot.add_argument(
+        "--slopes", action="store_true",
+        help="overlay power-law reference slopes, anchored to the first point",
+    )
+    p_plot.add_argument("--title", help="figure title")
+    p_plot.add_argument(
+        "--out", help="write to this path; omit to open a window")
+    p_plot.add_argument("--dpi", type=int, default=150)
+    p_plot.set_defaults(func=_cmd_plot)
+
     p_bench = sub.add_parser(
         "bench", help="the measurement setup: what it can and cannot determine"
     )
@@ -543,6 +573,41 @@ def _cmd_powerlaw(args) -> int:
                 else f"{fit.dominant:+d} ({ALPHA_NAMES[fit.dominant]})")
     print(f"\n# dominant at the shortest fitted tau: {dominant}")
     print(f"# residual {fit.residual:.4e}, KKT optimality {fit.kkt:.2e}")
+    return 0
+
+
+def _cmd_plot(args) -> int:
+    """Draw one file. The only subcommand that needs matplotlib."""
+    from . import plot as plotting
+    from .registry import get
+
+    series = _load(args)
+    if args.draw == "phase":
+        from .stats.core import as_phase
+        ax = plotting.phase(as_phase(series), label=Path(args.path).name)
+    elif args.draw == "frequency":
+        from .types import to_frequency
+        fs = series if hasattr(series, "y") else to_frequency(series)
+        ax = plotting.frequency(fs, label=Path(args.path).name)
+    else:
+        result = get("estimator", args.estimator)(
+            series, taus=args.taus, max_af=args.max_af)
+        ci = None if args.no_confidence else _confidence_for(
+            argparse.Namespace(confidence=args.confidence, edof_method="auto"),
+            result, series)
+        ax = plotting.sigma_tau(result, confidence=ci,
+                                label=Path(args.path).name)
+        if args.slopes:
+            plotting.slope_guides(ax)
+    if args.title:
+        ax.set_title(args.title)
+
+    if args.out:
+        plotting.save(ax, args.out, dpi=args.dpi)
+        print(f"wrote {args.out}")
+    else:
+        import matplotlib.pyplot as plt
+        plt.show()
     return 0
 
 
