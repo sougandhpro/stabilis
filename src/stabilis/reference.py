@@ -26,6 +26,8 @@ __all__ = [
     "nbs14_1000point",
     "EXPECTED_NBS14_9POINT",
     "EXPECTED_NBS14_1000POINT",
+    "KNOWN_DISCREPANCIES",
+    "INTEROP_RTOL",
 ]
 
 # The classic nine three-digit values from NBS Monograph 140, Annex 8.E.
@@ -103,15 +105,49 @@ EXPECTED_NBS14_9POINT = {
     "oadev": {1: 91.22945, 2: 85.95287},
     "mdev": {1: 91.22945, 2: 74.78849},
     "totdev": {1: 91.22945, 2: 93.90379},
-    # CORRECTED 2026-08-07. The relayed table gave hdev(1) = 70.80608, which
-    # contradicts its own stated identity hdev == ohdev at AF 1 (there is no
-    # overlap to exploit at m=1, so the two estimators coincide). Our exact
-    # rational oracle certifies 70.806073185850378, i.e. 70.80607 to seven
-    # figures. The relayed value was a transcription error -- exactly the
-    # failure mode flagged in the header note above.
-    "hdev": {1: 70.80607, 2: 116.7980},
+    # hdev(1) is 70.80608 as relayed. See KNOWN_DISCREPANCIES -- it is left
+    # exactly as the source gives it, not silently corrected.
+    "hdev": {1: 70.80608, 2: 116.7980},
     "ohdev": {1: 70.80607, 2: 85.61487},
     "tdev": {1: 52.67135, 2: 86.35831},
+}
+
+# The published tables carry seven significant figures, so this is the
+# tightest tolerance the data supports. Asserting harder would be asserting
+# against digits the source never claimed.
+INTEROP_RTOL = 1e-6
+
+# Published entries that disagree with our certified value.
+#
+# **These are recorded, never edited away.** A reference table is evidence
+# about what the incumbent produced. Overwriting an entry with a number this
+# library computed turns an interoperability assertion into a statement
+# about ourselves and destroys the only thing the table was for. Likewise
+# nothing here may be interpolated, averaged, or filled in: a gap in a
+# reference table is a gap, and the absence of a value is itself data about
+# what has actually been checked.
+#
+# Each entry declares how large the disagreement is relative to
+# INTEROP_RTOL. A `rel` below it is a *source-quality note* -- the digit in
+# question is finer than the table claims, so both values pass -- and does
+# not exempt anything from the interop test. A `rel` above it would be a
+# real conflict and is asserted to be absent.
+#
+# (estimator, af): (published, certified, note)
+KNOWN_DISCREPANCIES = {
+    ("hdev", 1): (
+        70.80608,
+        70.806073185850378,
+        "The relayed table is internally inconsistent: it lists "
+        "ohdev(1) = 70.80607 for the same quantity, since at m=1 there is no "
+        "overlap to exploit and the two estimators coincide. Exact rational "
+        "arithmetic over the nine integers certifies 70.806073185850378, so "
+        "the hdev entry is one unit high in its seventh figure -- a relative "
+        "difference of ~1e-9, comfortably inside INTEROP_RTOL, so nothing "
+        "fails and nothing needs correcting. Recorded because it marks the "
+        "entry to scrutinise when NIST SP 1065 Table 29 is transcribed "
+        "directly; the current source is secondary.",
+    ),
 }
 
 EXPECTED_NBS14_1000POINT = {

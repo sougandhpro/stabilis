@@ -17,6 +17,8 @@ import pytest
 
 from stabilis.reference import (
     EXPECTED_NBS14_9POINT,
+    INTEROP_RTOL,
+    KNOWN_DISCREPANCIES,
     nbs14_1000point,
     nbs14_9point,
 )
@@ -78,13 +80,45 @@ def test_certified_nbs14_1000point(name, fn, exact, af):
 
 @pytest.mark.parametrize("name,fn,_exact", ESTIMATORS)
 def test_published_nbs14_9point_interop(name, fn, _exact):
-    """INTEROP: agrees with the Stable32-produced table to its 7 published figures."""
+    """INTEROP: agrees with the Stable32-produced table to its 7 published figures.
+
+    No entry is exempted and no entry has been edited. `INTEROP_RTOL` is the
+    tightest tolerance seven published figures support, so asserting against
+    the table as printed is both possible and required.
+    """
     expected = EXPECTED_NBS14_9POINT.get(name)
     if not expected:
         pytest.skip(f"no published values for {name}")
     result = fn(FreqSeries(nbs14_9point(), rate_hz=1.0), taus="all")
     for af, want in expected.items():
-        assert result.dev_at(af) == pytest.approx(want, rel=1e-6)
+        assert result.dev_at(af) == pytest.approx(want, rel=INTEROP_RTOL)
+
+
+def test_recorded_discrepancies_stay_below_the_published_tolerance():
+    """Declared source-quality notes must still be notes, not conflicts.
+
+    `KNOWN_DISCREPANCIES` exists so a table entry that disagrees with our
+    certified value gets *recorded* rather than quietly rewritten to match
+    us. Each one has to stay finer than the source's own precision -- if a
+    disagreement ever grows past `INTEROP_RTOL` it is a real conflict and
+    this fails, which is the point.
+    """
+    fs = FreqSeries(nbs14_9point(), rate_hz=1.0)
+    for (name, af), (published, certified, note) in KNOWN_DISCREPANCIES.items():
+        assert EXPECTED_NBS14_9POINT[name][af] == published, (
+            f"{name}({af}): the published value in the table was edited; "
+            f"reference tables record the source, not our own output"
+        )
+        assert published != certified, f"{name}({af}) no longer disagrees"
+        rel = abs(published - certified) / certified
+        assert rel < INTEROP_RTOL, (
+            f"{name}({af}): disagreement {rel:.2e} now exceeds the published "
+            f"tolerance {INTEROP_RTOL:.0e} -- this is a real conflict. {note}"
+        )
+        # And our own value must be the certified one, not the published one.
+        got = ohdev(fs, taus="all").dev_at(af) if name in ("hdev", "ohdev") else None
+        if got is not None:
+            assert got == pytest.approx(certified, rel=1e-12)
 
 
 @pytest.mark.parametrize("name,fn,_exact", ESTIMATORS)
@@ -134,11 +168,20 @@ def test_oracle_is_independent_of_the_production_path():
     Its independence is the entire evidential value: a shared helper would
     quietly turn the certified comparison into a tautology.
     """
+    import ast
     import inspect
 
     import stabilis.stats.classical as classical
     import stabilis.stats.core as core
 
     for module in (classical, core):
-        source = inspect.getsource(module)
-        assert "validate" not in source, f"{module.__name__} reaches into validate"
+        tree = ast.parse(inspect.getsource(module))
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.add(node.module or "")
+                names.update(f"{node.module or ''}.{a.name}" for a in node.names)
+        offenders = [n for n in names if "validate" in n or "certified" in n]
+        assert not offenders, f"{module.__name__} imports the oracle: {offenders}"

@@ -16,6 +16,15 @@ session noted above. Anything not directly checked says so.
 | Percival & Guttorp, "Long-memory processes, the Allan variance and wavelets", 1994 | Not fetched | The Haar-wavelet-variance = Allan-variance equivalence this library is built around. |
 | Galleani & Tavella, "The Dynamic Allan Variance" | Not fetched | DAVAR definition and normalization. Needed at M5. |
 | Howe & Percival, TOTVAR bias | Not fetched | TOTDEV is biased low for FM noise; the correction needs a noise type, which couples TOTVAR to noise ID. |
+| [Howe & Schlossberger, "Characterizing Frequency Stability Measurements Having Multiple Data Gaps", *IEEE Trans. UFFC* **69**(2) 468–472, 2022](https://tf.nist.gov/general/pdf/3150.pdf) | **Confirmed — read in full 2026-08-08** | The gap-filling method for M7, "Total Imputer". Fills a gap of `n` points with the preceding `n` points reversed and inverted, sloped to join continuously, with endpoints matched on a low-pass-filtered copy (their eq. 3) rather than pointwise. Multi-gap order: start from the longest run, impute rightward, reverse, repeat. Two things to carry forward — imputation *raises* EDOF by up to 6× for white noise, so filled samples must be excluded from the degrees-of-freedom count; and the authors themselves state imputation is not a substitute for a measurement deficiency and that gaps must be declared with results. |
+| Mondal & Percival, "Wavelet variance analysis for gappy time series", *Ann. Inst. Stat. Math.* **62**(5) 943–966, 2010 | Reported (cited as [7] by Howe & Schlossberger), not fetched | The imputation-*free* alternative: an unbiased wavelet variance for gapped series. Since Haar wavelet variance is the Allan variance, this drops into the M3 wavelet module and gives a gap-tolerant ADEV that invents no samples and inflates no EDOF. Shipping it alongside the imputer, and reporting where the two disagree, is a differentiator. |
+
+## Third-party code we do not use
+
+| Source | Licence | Decision |
+|---|---|---|
+| [`nkschlos/time-series-imputation`](https://github.com/nkschlos/time-series-imputation) — the authors' reference implementation of Total Imputer | **None.** GitHub API reports `license: null`, and there is no `LICENSE` file. All rights reserved. | **Do not vendor, port, or copy.** The published paper describes the algorithm completely enough to implement independently, which is what M7 does. Cite the paper, not the repository. |
+| `allantools` fixtures | LGPL-3.0 (unconfirmed, see below) | Test-only differential-testing dependency. No fixture is copied into this MPL repo. |
 
 ## Reference data
 

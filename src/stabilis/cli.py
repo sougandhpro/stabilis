@@ -16,6 +16,7 @@ from .docs import list_topics, read_topic, topic_summary
 from .log import configure
 from .preprocess import basic_stats
 from .provenance import to_dict
+from .stats.core import GAP_POLICIES
 from .tau import MODES
 
 __all__ = ["main", "build_parser"]
@@ -61,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         _add_input_args(p)
         p.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
         p.add_argument("--max-af", type=int, help="largest averaging factor")
+        p.add_argument(
+            "--gap-policy",
+            default="auto",
+            choices=GAP_POLICIES,
+            help="how a gap affects nearby terms; see `stabilis docs gaps`",
+        )
         p.add_argument("--json", action="store_true", help="emit JSON")
         p.set_defaults(func=_cmd_estimate, estimator=fn, estimator_name=name)
 
@@ -150,6 +157,11 @@ def _cmd_stats(args) -> int:
     return 0
 
 
+def _step_params(result, action: str) -> dict:
+    """Parameters of the last step with this action. The audit trail, reused."""
+    return [s for s in result.provenance.steps if s.action == action][-1].params
+
+
 def _cmd_estimate(args) -> int:
     """Run one estimator and print the tau table.
 
@@ -159,8 +171,13 @@ def _cmd_estimate(args) -> int:
     """
     series = _load(args)
     result = args.estimator(
-        series, taus=args.taus, max_af=args.max_af, keep_coeffs=False
+        series,
+        taus=args.taus,
+        max_af=args.max_af,
+        keep_coeffs=False,
+        gap_policy=args.gap_policy,
     )
+    policy = _step_params(result, "evaluate")
 
     if args.json:
         print(
@@ -182,6 +199,11 @@ def _cmd_estimate(args) -> int:
 
     print(f"# {result.kind.upper()} for {args.path}")
     print(f"# tau grid: {args.taus}   n = {series.n}   rate = {series.rate_hz:g} Hz")
+    if series.n_gaps:
+        print(
+            f"# {series.n_gaps} gaps, {policy['runs']} gap-free runs, "
+            f"policy '{policy['gap_policy']}', longest run {policy['longest_run']}"
+        )
     print("# confidence bounds not yet implemented (M2)")
     print(f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}  {result.kind.upper():>14}")
     for af, tau, n, dev in zip(result.af, result.tau_s, result.n_terms, result.dev):

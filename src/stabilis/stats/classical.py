@@ -124,10 +124,12 @@ def oadev(
     taus: str = "octave",
     max_af: int | None = None,
     keep_coeffs: bool = True,
+    gap_policy: str = "auto",
 ) -> StabilityResult:
     """Overlapping Allan deviation. See theory/avar.md."""
     return run_estimator(
-        _coeffs_oavar, SCALE_ALLAN, "oadev", series, taus, max_af, 2, keep_coeffs
+        _coeffs_oavar, SCALE_ALLAN, "oadev", series, taus, max_af, 2,
+        keep_coeffs, gap_policy,
     )
 
 
@@ -137,9 +139,13 @@ def adev(
     taus: str = "octave",
     max_af: int | None = None,
     keep_coeffs: bool = True,
+    gap_policy: str = "auto",
 ) -> StabilityResult:
     """Non-overlapping Allan deviation. See theory/avar.md."""
-    return run_estimator(_coeffs_avar, SCALE_ALLAN, "adev", series, taus, max_af, 2, keep_coeffs)
+    return run_estimator(
+        _coeffs_avar, SCALE_ALLAN, "adev", series, taus, max_af, 2,
+        keep_coeffs, gap_policy,
+    )
 
 
 @register("estimator", "mdev")
@@ -148,9 +154,13 @@ def mdev(
     taus: str = "octave",
     max_af: int | None = None,
     keep_coeffs: bool = True,
+    gap_policy: str = "auto",
 ) -> StabilityResult:
     """Modified Allan deviation. See theory/mvar.md."""
-    return run_estimator(_coeffs_mvar, SCALE_ALLAN, "mdev", series, taus, max_af, 3, keep_coeffs)
+    return run_estimator(
+        _coeffs_mvar, SCALE_ALLAN, "mdev", series, taus, max_af, 3,
+        keep_coeffs, gap_policy,
+    )
 
 
 @register("estimator", "tdev")
@@ -159,9 +169,13 @@ def tdev(
     taus: str = "octave",
     max_af: int | None = None,
     keep_coeffs: bool = True,
+    gap_policy: str = "auto",
 ) -> StabilityResult:
     """Time deviation, in seconds. See theory/tdev.md."""
-    return run_estimator(_coeffs_tvar, SCALE_HADAMARD, "tdev", series, taus, max_af, 3, keep_coeffs)
+    return run_estimator(
+        _coeffs_tvar, SCALE_HADAMARD, "tdev", series, taus, max_af, 3,
+        keep_coeffs, gap_policy,
+    )
 
 
 @register("estimator", "ohdev")
@@ -170,6 +184,10 @@ def ohdev(
     taus: str = "octave",
     max_af: int | None = None,
     keep_coeffs: bool = True,
+    gap_policy: str = "auto",
 ) -> StabilityResult:
     """Overlapping Hadamard deviation. See theory/hvar.md."""
-    return run_estimator(_coeffs_ohvar, SCALE_HADAMARD, "ohdev", series, taus, max_af, 3, keep_coeffs)
+    return run_estimator(
+        _coeffs_ohvar, SCALE_HADAMARD, "ohdev", series, taus, max_af, 3,
+        keep_coeffs, gap_policy,
+    )

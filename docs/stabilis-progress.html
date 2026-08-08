@@ -36,9 +36,9 @@ ul { padding-left: 5mm; margin: 0 0 3mm; }
 <h1>stabilis — progress report</h1>
 <p class="sub">Frequency stability analysis engine. Milestones M0 and M1 complete.</p>
 <div class="meta">
-generated 2026-08-07 21:37 UTC &nbsp;·&nbsp; stabilis 0.0.1.dev0 &nbsp;·&nbsp;
+generated 2026-08-08 06:50 UTC &nbsp;·&nbsp; stabilis 0.0.1.dev0 &nbsp;·&nbsp;
 numpy 2.2.6 &nbsp;·&nbsp; python 3.10.12<br>
-commit 1b46968 (3 total) — WORKING TREE DIRTY
+commit 761d89c (4 total) — WORKING TREE DIRTY
  &nbsp;·&nbsp; every figure below is measured at generation time
 </div>
 <h2>What this is</h2>
@@ -137,6 +137,39 @@ this at 8 ULP, a figure derived from the measurements below rather than tuned.</
 <p>Kasdin–Walter generation, log-log periodogram slope recovered over
 1e-3 &lt; f &lt; 0.1, averaged over eight realizations.</p>
 <table><thead><tr><th class="n">α (requested)</th><th class="n">slope (recovered)</th><th class="n">|error|</th></tr></thead><tbody><tr><td class="n">2</td><td class="n">+1.9734</td><td class="n">0.0266</td></tr><tr><td class="n">1</td><td class="n">+0.9912</td><td class="n">0.0088</td></tr><tr><td class="n">0</td><td class="n">+0.0043</td><td class="n">0.0043</td></tr><tr><td class="n">-1</td><td class="n">-0.9943</td><td class="n">0.0057</td></tr><tr><td class="n">-2</td><td class="n">-1.9955</td><td class="n">0.0045</td></tr></tbody></table>
+<h2>Results: one missing sample</h2>
+<p>Gap handling is where a metrology tool fails most expensively,
+because it fails quietly. Integrating frequency to phase with a cumulative sum
+cannot step over an unknown increment, so a single <code>NaN</code> made every
+later phase sample <code>NaN</code> — and the estimator, dropping non-finite
+terms as designed, silently analysed only the data <em>before</em> the gap.</p>
+<p>Measured at generation time over 400 realizations of 200 white-FM points
+with one sample removed at the midpoint, each compared against its own ungapped
+answer. <em>Old</em> integrates the gapped record in one cumulative sum, which
+is what the estimator used to do; <em>new</em> segments at the gap, integrates
+each run from its own zero and pools the coefficients. Bias is the mean signed
+error and is the figure that matters — on any single record either path can land
+closer by luck, but only one of them is centred on the right answer.</p>
+<table><thead><tr><th class="n">m</th><th class="n">old bias</th><th class="n">new bias</th><th class="n">old RMS</th><th class="n">new RMS</th><th>terms ungapped / old / new</th><th>terms lost</th></tr></thead><tbody><tr><td class="n">1</td><td class="n">-0.04%</td><td class="n">+0.01%</td><td class="n">5.92%</td><td class="n">0.57%</td><td>199 / 99 / 197</td><td>2 = 2m</td></tr><tr><td class="n">2</td><td class="n">-0.50%</td><td class="n">+0.03%</td><td class="n">6.78%</td><td class="n">0.77%</td><td>197 / 97 / 193</td><td>4 = 2m</td></tr><tr><td class="n">4</td><td class="n">-0.86%</td><td class="n">-0.10%</td><td class="n">8.82%</td><td class="n">1.52%</td><td>193 / 93 / 185</td><td>8 = 2m</td></tr><tr><td class="n">8</td><td class="n">-1.25%</td><td class="n">-0.18%</td><td class="n">12.25%</td><td class="n">3.27%</td><td>185 / 85 / 169</td><td>16 = 2m</td></tr><tr><td class="n">16</td><td class="n">-3.00%</td><td class="n">-0.29%</td><td class="n">18.16%</td><td class="n">6.92%</td><td>169 / 69 / 137</td><td>32 = 2m</td></tr></tbody></table>
+<div class="note"><strong>One sample in two hundred, and the old path
+was biased low by percent — with no warning and a plausible-looking term
+count.</strong> The bias is systematic and grows with τ, because the surviving
+terms were not a random subset of the record: they were the first half of it.
+Scatter falls by roughly an order of magnitude too, which is the direct
+consequence of keeping 197 terms instead of 99.
+<p>The correct cost of a gap is the <code>2m</code> terms whose window spans it
+— <code>3m</code> for the Hadamard and modified families — and that is now
+exactly what it costs, asserted term by term in
+<code>tests/test_gaps.py</code>. Frequency input defaults to the segmenting
+policy and refuses the masking one; phase input keeps masking, which is correct
+when the timescale ran continuously across the gap. The choice, the number of
+runs and the longest run are all recorded in provenance.</p>
+<p>The residual few tenths of a percent in the "new bias" column is not a
+defect and does not go away: <code>E[σ̂] = σ·√(2/η)·Γ((η+1)/2)/Γ(η/2)</code>, so
+a deviation estimated from fewer terms is genuinely low on average. It is the
+same bias the ungapped estimate carries, slightly amplified. Correcting it, and
+reporting the error bar that goes with it, is M2's job — and the reason this
+defect had to be fixed first, since it feeds the term count that sets η.</p></div>
 <h2>Design decisions worth recording</h2>
 
 <h3>Scale factors live outside the coefficients</h3>
@@ -169,9 +202,9 @@ arbitrary code execution. <code>.npy</code> covers the same need safely.</p>
 <h2>Current state</h2>
 
 <div class="kv">
-  <dt>test suite</dt><dd class="mono">154 passed in 2.31s &nbsp; <span class="ok">PASS</span></dd>
-  <dt>wall time</dt><dd class="mono">2.6 s</dd>
-  <dt>latest commit</dt><dd class="mono">1b46968 — Add a self-measuring progress report (HTML and PDF)</dd>
+  <dt>test suite</dt><dd class="mono">173 passed in 1.89s &nbsp; <span class="ok">PASS</span></dd>
+  <dt>wall time</dt><dd class="mono">2.1 s</dd>
+  <dt>latest commit</dt><dd class="mono">761d89c — Record M0/M1 state and regenerate the report</dd>
 </div>
 <p>Three structural properties are enforced by tests rather than convention: the
 core computes with scipy and matplotlib absent; every theory page must declare

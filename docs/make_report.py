@@ -35,7 +35,7 @@ from stabilis.reference import (
     nbs14_9point,
 )
 from stabilis.stats import adev, mdev, oadev, ohdev, tdev
-from stabilis.synth import power_law_noise
+from stabilis.synth import power_law_freq, power_law_noise
 from stabilis.types import FreqSeries, PhaseSeries, to_frequency, to_phase
 from stabilis.validate.certified import (
     certified_deviation,
@@ -242,6 +242,57 @@ def measure_identities():
     return rows
 
 
+GAP_TRIALS = 400
+
+
+def measure_gap_handling():
+    """What one missing frequency sample costs, before and after the fix.
+
+    The "before" numbers are not quoted from memory -- they are recomputed
+    by integrating the gapped record with `to_phase`, which is exactly what
+    the estimator used to do and which still propagates NaN to the end of
+    the record by design. Defect and repair are measured side by side at
+    generation time, like everything else here.
+
+    Averaged over many realizations rather than shown for one, deliberately.
+    Both paths are estimates of a noisy quantity, so on any single record
+    the broken one can land closer by luck -- and does. The meaningful
+    comparison is the *bias*: mean signed deviation from the ungapped
+    answer, which is where truncating half the record shows up as something
+    other than noise.
+    """
+    stats = {m: {"old": [], "new": []} for m in (1, 2, 4, 8, 16)}
+    for seed in range(GAP_TRIALS):
+        y = power_law_freq(200, 0, rate_hz=1.0, rng=np.random.default_rng(seed)).y
+        gapped = y.copy()
+        gapped[100] = np.nan
+        clean = oadev(FreqSeries(y, rate_hz=1.0), taus="all", keep_coeffs=False)
+        fixed = oadev(FreqSeries(gapped, rate_hz=1.0), taus="all", keep_coeffs=False)
+        old = oadev(to_phase(FreqSeries(gapped, rate_hz=1.0)), taus="all", keep_coeffs=False)
+        for m, acc in stats.items():
+            c, f, o = (r.af.tolist().index(m) for r in (clean, fixed, old))
+            acc["old"].append(old.dev[o] / clean.dev[c] - 1.0)
+            acc["new"].append(fixed.dev[f] / clean.dev[c] - 1.0)
+            acc["terms"] = (int(clean.n_terms[c]), int(old.n_terms[o]), int(fixed.n_terms[f]))
+
+    rows = []
+    for m, acc in stats.items():
+        old_e, new_e = np.array(acc["old"]), np.array(acc["new"])
+        ref, o_t, n_t = acc["terms"]
+        rows.append(
+            {
+                "m": m,
+                "old_bias": float(old_e.mean()),
+                "new_bias": float(new_e.mean()),
+                "old_rms": float(np.sqrt((old_e**2).mean())),
+                "new_rms": float(np.sqrt((new_e**2).mean())),
+                "terms": f"{ref} / {o_t} / {n_t}",
+                "lost": ref - n_t,
+            }
+        )
+    return rows
+
+
 def measure_generator():
     """The NBS14 recursion against its published check values."""
     ints = nbs14_1000point_integers(3)
@@ -360,6 +411,7 @@ def build_html():
     slopes = measure_psd_slopes()
     identities = measure_identities()
     gen = measure_generator()
+    gaps = measure_gap_handling()
     tests = run_tests()
     git = git_state()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -547,6 +599,62 @@ this at 8 ULP, a figure derived from the measurements below rather than tuned.</
     )
 
     # --- decisions
+    parts.append("<h2>Results: one missing sample</h2>")
+    parts.append(
+        """<p>Gap handling is where a metrology tool fails most expensively,
+because it fails quietly. Integrating frequency to phase with a cumulative sum
+cannot step over an unknown increment, so a single <code>NaN</code> made every
+later phase sample <code>NaN</code> — and the estimator, dropping non-finite
+terms as designed, silently analysed only the data <em>before</em> the gap.</p>
+<p>Measured at generation time over TRIALS realizations of 200 white-FM points
+with one sample removed at the midpoint, each compared against its own ungapped
+answer. <em>Old</em> integrates the gapped record in one cumulative sum, which
+is what the estimator used to do; <em>new</em> segments at the gap, integrates
+each run from its own zero and pools the coefficients. Bias is the mean signed
+error and is the figure that matters — on any single record either path can land
+closer by luck, but only one of them is centred on the right answer.</p>""".replace("TRIALS", str(GAP_TRIALS))
+    )
+    parts.append(
+        table(
+            ["m", "old bias", "new bias", "old RMS", "new RMS",
+             "terms ungapped / old / new", "terms lost"],
+            [
+                (
+                    r["m"],
+                    f"{r['old_bias'] * 100:+.2f}%",
+                    f"{r['new_bias'] * 100:+.2f}%",
+                    f"{r['old_rms'] * 100:.2f}%",
+                    f"{r['new_rms'] * 100:.2f}%",
+                    r["terms"],
+                    f"{r['lost']} = {r['lost'] // r['m']}m",
+                )
+                for r in gaps
+            ],
+            numeric=(0, 1, 2, 3, 4),
+        )
+    )
+    parts.append(
+        """<div class="note"><strong>One sample in two hundred, and the old path
+was biased low by percent — with no warning and a plausible-looking term
+count.</strong> The bias is systematic and grows with τ, because the surviving
+terms were not a random subset of the record: they were the first half of it.
+Scatter falls by roughly an order of magnitude too, which is the direct
+consequence of keeping 197 terms instead of 99.
+<p>The correct cost of a gap is the <code>2m</code> terms whose window spans it
+— <code>3m</code> for the Hadamard and modified families — and that is now
+exactly what it costs, asserted term by term in
+<code>tests/test_gaps.py</code>. Frequency input defaults to the segmenting
+policy and refuses the masking one; phase input keeps masking, which is correct
+when the timescale ran continuously across the gap. The choice, the number of
+runs and the longest run are all recorded in provenance.</p>
+<p>The residual few tenths of a percent in the "new bias" column is not a
+defect and does not go away: <code>E[σ̂] = σ·√(2/η)·Γ((η+1)/2)/Γ(η/2)</code>, so
+a deviation estimated from fewer terms is genuinely low on average. It is the
+same bias the ungapped estimate carries, slightly amplified. Correcting it, and
+reporting the error bar that goes with it, is M2's job — and the reason this
+defect had to be fixed first, since it feeds the term count that sets η.</p></div>"""
+    )
+
     parts.append("<h2>Design decisions worth recording</h2>")
     parts.append(
         """

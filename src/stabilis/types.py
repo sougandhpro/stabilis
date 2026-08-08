@@ -30,6 +30,7 @@ __all__ = [
     "FreqSeries",
     "to_frequency",
     "to_phase",
+    "phase_from_frequency",
     "precision_ratio",
     "PRECISION_WARN_RATIO",
 ]
@@ -179,6 +180,20 @@ def to_frequency(ps: PhaseSeries) -> FreqSeries:
     )
 
 
+def phase_from_frequency(y: np.ndarray, tau0: float) -> np.ndarray:
+    """Integrate one contiguous frequency run into phase.
+
+        x[0] = 0;  x[k] = sum_{i<k} y[i] * tau0
+
+    Array in, array out, deliberately: gapped frequency data must be
+    integrated run by run, and each run needs its own zero because the
+    phase accumulated during a gap is genuinely unknown. See
+    `stats.core.phase_runs`, which is the only caller that should ever pass
+    a *gapped* `y` -- and it does not, it passes the runs.
+    """
+    return np.concatenate(([0.0], np.cumsum(y) * tau0))
+
+
 def to_phase(fs: FreqSeries) -> PhaseSeries:
     """Phase from fractional frequency, by cumulative sum.
 
@@ -193,8 +208,14 @@ def to_phase(fs: FreqSeries) -> PhaseSeries:
     few ULP, not bit-exactly: a cumulative sum of differences does not
     telescope exactly in floating point. Measured accumulation is 0.2 ULP at
     n=10, 1.0 at n=1e3, 2.5 at n=1e5. Bounded in test_types.py.
+
+    **A NaN in `y` poisons every later sample**, because the cumulative sum
+    cannot step over an unknown increment. That is honest about absolute
+    phase and useless for stability statistics, which never need it. Do not
+    reach for this function to analyse gapped frequency data -- the
+    estimators segment first, via `stats.core.phase_runs`.
     """
-    x = np.concatenate(([0.0], np.cumsum(fs.y) * fs.tau0_s))
+    x = phase_from_frequency(fs.y, fs.tau0_s)
     return PhaseSeries(
         x=x,
         rate_hz=fs.rate_hz,

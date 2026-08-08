@@ -50,6 +50,36 @@ change every line.
 
 ## Validation conventions
 
+### Reference data is evidence. Do not touch it.
+
+Absolute rules when validating against a dataset. Each has already been
+violated once, which is why they are written down.
+
+- **Never invent a number.** An expected value comes from a published
+  source or from the exact-rational oracle, and the two are labelled
+  differently because they mean different things. A value produced by this
+  library and then written into a reference table makes the assertion a
+  statement about itself.
+- **Never edit a published entry to match our output.** If a table
+  disagrees with the oracle, record it in `reference.KNOWN_DISCREPANCIES`
+  with the published value, the certified value and the reason, and leave
+  the table alone. A test asserts every recorded disagreement stays inside
+  `INTEROP_RTOL`, so a real conflict still fails the suite.
+- **Never fill a gap in validation data.** No interpolation, no imputation,
+  no dropping to the longest segment, no quiet padding. Validate on the
+  record as it came. Gap *filling* is a feature under test (M7, Howe &
+  Schlossberger) and must never be applied to the fixtures that test it —
+  the imputer is validated against records where the removed points are
+  known, by comparing the filled result to the original.
+- **A missing expected value stays missing.** Absence is data about what
+  has actually been checked. Skip the assertion and say so; do not
+  interpolate a neighbouring tau or average two estimators.
+- **Assert at the tolerance the source supports, no tighter.** Seven
+  published figures means `rel=1e-6`. Tightening beyond what the source
+  claims tests our transcription, not our arithmetic.
+
+### General
+
 - Every new estimator must add a theory page, a test, and a row in the
   validation report before its milestone counts as passed.
 - Prefer analytic identities over reference tables. The best single test
