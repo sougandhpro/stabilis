@@ -163,9 +163,20 @@ stabilis gui                     # opens http://127.0.0.1:8765
 stabilis gui --root ~/data       # confine the file browser to one tree
 ```
 
-A small local page: browse to a file, say which column holds the data and
-what units it is in, choose an estimator and a tau grid, and get the curve
-with the numbers behind it. It computes nothing itself — it calls the same
+A small local page. Pick a file and a **preview of the raw column appears
+immediately** — because you cannot choose a range you cannot see. Drag on
+it to select one, set the units and the column, clean up outliers, take or
+override the suggested tau grid, and analyse.
+
+Every selection prints **the equivalent non-interactive call**, so the
+session is reproducible and doubles as how you learn the API:
+
+```
+series = edit.select_range(series, 3000, 50000, by='index', reason='after warm-up')
+series = edit.drop_outliers(series, threshold=6.0, reason='counter glitch')
+```
+
+An exclusion that exists only as a mouse gesture is not evidence. It computes nothing itself — it calls the same
 library functions the CLI does, so the two cannot disagree.
 
 Units matter and are not guessed: the library works in seconds of phase and

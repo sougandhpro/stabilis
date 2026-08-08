@@ -35,6 +35,8 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import numpy as np
+
 __all__ = ["serve", "DEFAULT_PORT"]
 
 DEFAULT_PORT = 8765
@@ -110,6 +112,7 @@ def _analyze(root: Path, req: dict) -> dict:
                     column=int(req.get("column") or 0),
                     time_column=time_column)
     series = _rescale(series, req.get("unit"), is_phase)
+    series, prep = _prepare(series, req)
 
     name = req.get("estimator", "oadev")
     if name not in ESTIMATORS:
@@ -162,10 +165,143 @@ def _analyze(root: Path, req: dict) -> dict:
         "kind": result.kind, "n": series.n, "rate_hz": series.rate_hz,
         "rows": rows, "notes": notes,
         "has_ci": ci is not None,
+        "prep": prep,
         "read_as": "phase" if is_phase else "frequency",
         "unit": req.get("unit") or ("s" if is_phase else "fractional"),
         "column": int(req.get("column") or 0),
     }
+
+
+# A preview is a picture, and a picture has a few thousand pixels. Sending
+# a million points to matplotlib to draw them on top of each other is slow
+# and looks identical.
+PREVIEW_POINTS = 2000
+
+
+def _decimate(values: np.ndarray, target: int = PREVIEW_POINTS):
+    """Min/max decimation: one pair per bucket, so spikes survive.
+
+    **Not stride sampling.** Taking every k-th point would hide exactly the
+    outliers this view exists to find -- a one-sample glitch has a k-1 in k
+    chance of vanishing. Keeping the minimum and maximum of each bucket
+    preserves the visual envelope, so a spike is still a spike at any zoom.
+
+    Returns `(index, value)` pairs at the original sample indices, so a
+    range dragged on the preview means the same thing to `select_range`.
+    """
+    n = values.size
+    if n <= target:
+        return np.arange(n), values
+    buckets = max(1, target // 2)
+    edges = np.linspace(0, n, buckets + 1).astype(int)
+    idx, out = [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        if hi <= lo:
+            continue
+        chunk = values[lo:hi]
+        finite = np.isfinite(chunk)
+        if not finite.any():
+            idx.append(lo)
+            out.append(np.nan)
+            continue
+        where = np.flatnonzero(finite)
+        lo_i = where[np.argmin(chunk[where])]
+        hi_i = where[np.argmax(chunk[where])]
+        for j in sorted((lo_i, hi_i)):
+            idx.append(lo + int(j))
+            out.append(float(chunk[j]))
+    return np.asarray(idx), np.asarray(out)
+
+
+def _preview(root: Path, req: dict) -> dict:
+    """The raw column, decimated, plus what stabilis would suggest for it.
+
+    Deliberately cheap and deliberately *before* any estimator runs: the
+    point is to see the data in order to choose a range, and a preview that
+    made you wait would not get used.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from .io.text import read_text
+    from .tau import suggest
+
+    path = _safe(root, req["path"])
+    column = int(req.get("column") or 0)
+    time_column = int(req["time_column"]) if req.get("time_column") else None
+    values, times, defects = read_text(path, column=column,
+                                       time_column=time_column)
+    is_phase = req.get("data_kind", "phase") == "phase"
+    factor = (PHASE_UNITS if is_phase else FREQ_UNITS).get(req.get("unit"), 1.0)
+    values = values * factor
+
+    rate = float(req["rate"]) if req.get("rate") else None
+    jitter = None
+    if times is not None:
+        from .io.timebase import infer_rate, parse_times
+        try:
+            seconds, _epoch, _fmt = parse_times(times, req.get("time_format"))
+            rate, jitter = infer_rate(seconds)
+        except Exception:
+            pass                       # fall back to whatever was typed
+    rate = rate or 1.0
+
+    idx, shown = _decimate(values)
+    fig, ax = plt.subplots(figsize=(9.0, 3.2))
+    ax.plot(idx / rate, shown, linewidth=0.8)
+    ax.set_xlabel("time from start (s)")
+    ax.set_ylabel("phase (s)" if is_phase else "fractional frequency")
+    ax.grid(True, alpha=0.3)
+    if req.get("start") or req.get("stop"):
+        lo = float(req.get("start") or 0) / rate
+        hi = float(req.get("stop") or values.size) / rate
+        ax.axvspan(lo, hi, alpha=0.18, color="tab:orange")
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=110)
+    plt.close(fig)
+
+    finite = np.isfinite(values)
+    return {
+        "png": base64.b64encode(buf.getvalue()).decode("ascii"),
+        "n": int(values.size),
+        "rate_hz": float(rate),
+        "jitter": None if jitter is None else float(jitter),
+        "n_gaps": int((~finite).sum()),
+        "shown": int(shown.size),
+        "defects": None if defects.clean else defects.describe(),
+        "suggest": suggest(int(values.size), float(rate)),
+    }
+
+
+def _prepare(series, req: dict):
+    """Apply the range and cleanup the page asked for, and say what it did.
+
+    Returns `(series, lines)` where `lines` are the equivalent
+    non-interactive calls. **A selection that exists only as a mouse
+    gesture is not evidence**, so the page shows the code that reproduces
+    it -- which doubles as how a user learns the API for their own scripts.
+    """
+    from .edit import drop_outliers, select_range, summary
+
+    lines = []
+    start = int(req["start"]) if str(req.get("start", "")).strip() else None
+    stop = int(req["stop"]) if str(req.get("stop", "")).strip() else None
+    if start is not None or stop is not None:
+        reason = req.get("reason") or "selected in the stabilis gui"
+        series = select_range(series, start, stop, by="index", reason=reason)
+        lines.append(f"series = edit.select_range(series, {start}, {stop}, "
+                     f"by='index', reason={reason!r})")
+
+    threshold = str(req.get("outlier_threshold", "")).strip()
+    if threshold:
+        reason = req.get("reason") or "outlier rejection in the stabilis gui"
+        series = drop_outliers(series, threshold=float(threshold),
+                               reason=reason)
+        lines.append(f"series = edit.drop_outliers(series, "
+                     f"threshold={float(threshold)}, reason={reason!r})")
+    return series, {"calls": lines, "summary": summary(series)}
 
 
 def _rescale(series, unit, is_phase: bool):
@@ -243,13 +379,15 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/analyze":
+        handler = {"/api/analyze": _analyze, "/api/preview": _preview}.get(
+            self.path)
+        if handler is None:
             self._send(404, b"not found", "text/plain")
             return
         length = int(self.headers.get("Content-Length", 0))
         try:
             req = json.loads(self.rfile.read(length) or b"{}")
-            self._json(200, _analyze(self.root, req))
+            self._json(200, handler(self.root, req))
         except Exception as exc:  # surfaced in the page, not swallowed
             self._json(400, {"error": f"{type(exc).__name__}: {exc}"})
 
@@ -342,6 +480,17 @@ button.inline { width: auto; margin-top: 0; padding: 6px 14px; flex: none; }
 #files .empty { opacity: .55; cursor: default; font-style: italic; }
 #files .empty:hover { background: none; }
 img { max-width: 100%; border-radius: 4px; }
+#prevwrap { position: relative; display: inline-block; cursor: crosshair;
+            user-select: none; }
+#band { position: absolute; top: 0; bottom: 0; background: rgba(255,150,0,.25);
+        border-left: 1px solid #f90; border-right: 1px solid #f90;
+        pointer-events: none; display: none; }
+pre.calls { background: rgba(128,128,128,.14); padding: 8px 10px;
+            border-radius: 4px; font-size: 12px; overflow-x: auto;
+            white-space: pre-wrap; }
+.pill { display: inline-block; padding: 1px 7px; border-radius: 9px;
+        background: rgba(128,128,128,.25); font-size: 11px; margin-right: 6px; }
+.warn { color: #d08000; }
 table { border-collapse: collapse; font-size: 12px; margin-top: 14px; }
 th, td { padding: 3px 10px 3px 0; text-align: right; white-space: nowrap; }
 th { border-bottom: 1px solid rgba(128,128,128,.5); text-align: right; }
@@ -372,6 +521,14 @@ td.via { text-align: left; opacity: .7; }
     <div><label>time column</label><input id="time_column" placeholder="none"></div>
   </div>
   <div class="row">
+    <div><label>from sample</label><input id="start" placeholder="start"></div>
+    <div><label>to sample</label><input id="stop" placeholder="end"></div>
+  </div>
+  <label>reason for the selection (goes in the record)</label>
+  <input id="reason" placeholder="e.g. after warm-up">
+  <label>outlier threshold (MAD sigmas, blank = keep all)</label>
+  <input id="outlier_threshold" placeholder="off">
+  <div class="row">
     <div><label>rate (Hz)</label><input id="rate" value="1.0"></div>
     <div><label>max avg factor</label><input id="max_af" placeholder="auto"></div>
   </div>
@@ -388,7 +545,11 @@ td.via { text-align: left; opacity: .7; }
   <button id="go">Analyse</button>
   <div id="err" class="err"></div>
 </div>
-<div id="main"><p class="muted">Pick a file on the left, then Analyse.</p></div>
+<div id="main">
+  <div id="prep"></div>
+  <div id="out"><p class="muted">Pick a file on the left. A preview appears,
+    then drag on it to choose a range.</p></div>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 let dir = "", picked = null;
@@ -426,7 +587,7 @@ async function browse(d) {
   for (const f of j.files) add(f.name + "  (" + fmt(f.size) + ")",
       ev => { picked = dir ? dir + "/" + f.name : f.name;
               [...box.children].forEach(c => c.classList.remove("sel"));
-              ev.target.classList.add("sel"); }, false);
+              ev.target.classList.add("sel"); preview(); }, false);
   if (!j.dirs.length && !j.files.length) {
     const el = document.createElement("div");
     el.className = "empty";
@@ -445,6 +606,85 @@ function add(text, fn, isDir) {
 }
 function fmt(n) { return n > 1e6 ? (n/1e6).toFixed(1)+" MB"
                  : n > 1e3 ? (n/1e3).toFixed(0)+" kB" : n+" B"; }
+// ---- preview: the point is to see the data before choosing a range ----
+let previewInfo = null;
+async function preview() {
+  if (!picked) return;
+  $("err").textContent = "";
+  $("prep").innerHTML = '<p class="muted">reading...</p>';
+  const body = { path: picked, data_kind: $("data_kind").value,
+    column: $("column").value, time_column: $("time_column").value,
+    unit: $("unit").value, rate: $("rate").value,
+    start: $("start").value, stop: $("stop").value };
+  try {
+    const r = await fetch("/api/preview", { method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (j.error) { $("prep").innerHTML = ""; $("err").textContent = j.error; return; }
+    previewInfo = j;
+    if (!$("rate").value || $("time_column").value) $("rate").value = j.rate_hz;
+    drawPreview(j);
+  } catch (e) { $("err").textContent = String(e); }
+}
+function drawPreview(j) {
+  const e = s => String(s).replace(/[&<>"]/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let h = '<div id="prevwrap"><img id="prev" src="data:image/png;base64,'
+        + j.png + '"><div id="band"></div></div>';
+  h += '<p class="note"><span class="pill">' + j.n + ' points</span>'
+     + '<span class="pill">' + j.rate_hz.toPrecision(6) + ' Hz</span>'
+     + '<span class="pill">' + j.n_gaps + ' gaps</span>'
+     + '<span class="pill">showing ' + j.shown + '</span></p>';
+  if (j.jitter !== null && j.jitter > 1e-3)
+    h += '<p class="note warn">timestamps are ragged: interquartile spread '
+       + (j.jitter*100).toFixed(2) + '% of the median interval. The rate '
+       + 'above is the median; the grid is not uniform.</p>';
+  if (j.defects)
+    h += '<p class="note warn">file defects tolerated: ' + e(j.defects) + '</p>';
+  h += '<p class="note">suggested tau grid: <b>' + e(j.suggest.mode) + '</b> to AF '
+     + j.suggest.max_af + ' (' + j.suggest.n_taus + ' points) &mdash; '
+     + e(j.suggest.why) + ' <button id="usesuggest" class="inline">use it</button></p>';
+  $("prep").innerHTML = h;
+  $("usesuggest").onclick = () => {
+    $("taus").value = j.suggest.mode;
+    $("max_af").value = j.suggest.max_af;
+  };
+  wireDrag();
+}
+// Dragging maps pixels back to sample indices, so what is dragged and what
+// `edit.select_range` receives are the same thing.
+function wireDrag() {
+  const wrap = $("prevwrap"), img = $("prev"), band = $("band");
+  if (!wrap || !previewInfo) return;
+  let from = null;
+  const toSample = ev => {
+    const box = img.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+    return Math.round(f * previewInfo.n);
+  };
+  wrap.onmousedown = ev => { from = toSample(ev); band.style.display = "block"; };
+  wrap.onmousemove = ev => {
+    if (from === null) return;
+    const box = img.getBoundingClientRect();
+    const a = Math.min(from, toSample(ev)) / previewInfo.n * box.width;
+    const b = Math.max(from, toSample(ev)) / previewInfo.n * box.width;
+    band.style.left = a + "px"; band.style.width = (b - a) + "px";
+  };
+  wrap.onmouseup = ev => {
+    if (from === null) return;
+    const to = toSample(ev);
+    const lo = Math.min(from, to), hi = Math.max(from, to);
+    from = null;
+    if (hi - lo < 2) { band.style.display = "none";
+                       $("start").value = ""; $("stop").value = ""; return; }
+    $("start").value = lo; $("stop").value = hi;
+  };
+}
+for (const id of ["column", "time_column", "unit", "data_kind"])
+  $(id).addEventListener("change", preview);
+for (const id of ["start", "stop"])
+  $(id).addEventListener("change", () => { if (previewInfo) preview(); });
+
 $("go").onclick = async () => {
   $("err").textContent = "";
   if (!picked) { $("err").textContent = "pick a file first"; return; }
@@ -453,7 +693,9 @@ $("go").onclick = async () => {
     rate: $("rate").value, estimator: $("estimator").value,
     taus: $("taus").value, max_af: $("max_af").value,
     column: $("column").value, time_column: $("time_column").value,
-    unit: $("unit").value,
+    unit: $("unit").value, start: $("start").value, stop: $("stop").value,
+    reason: $("reason").value,
+    outlier_threshold: $("outlier_threshold").value,
     confidence: $("confidence").checked, slopes: $("slopes").checked };
   try {
     const r = await fetch("/api/analyze", { method: "POST",
@@ -483,7 +725,18 @@ function render(j) {
        + '</td><td class="via">' + e(r.via) + "</td>";
     h += "</tr>";
   }
-  document.getElementById("main").innerHTML = h + "</table>";
+  if (j.prep && j.prep.calls.length) {
+    h += '<p class="note">the same thing without the mouse &mdash; an '
+       + 'exclusion that exists only as a gesture is not evidence:</p>';
+    h += '<pre class="calls">' + e(j.prep.calls.join("\n")) + '</pre>';
+  }
+  if (j.prep) {
+    const s = j.prep.summary;
+    h += '<p class="note">analysed ' + s.n + ' points, ' + s.n_gaps + ' gaps ('
+       + (s.gap_fraction*100).toFixed(2) + '%), longest run ' + s.longest_run
+       + '</p>';
+  }
+  document.getElementById("out").innerHTML = h + "</table>";
 }
 browse("");
 </script></body></html>

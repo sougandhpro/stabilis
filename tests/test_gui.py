@@ -290,3 +290,110 @@ def test_a_unit_conversion_is_recorded_rather_than_folded_in_silently(tmp_path):
     # actually happened.
     same = _rescale(series, "s", is_phase=True)
     assert "unit_conversion" not in [s.action for s in same.provenance.steps]
+
+
+# ---------------------------------------------------------------------------
+# The preparation stage
+# ---------------------------------------------------------------------------
+
+
+def test_decimation_keeps_spikes_that_stride_sampling_would_lose():
+    """The property the preview exists for.
+
+    A preview is for spotting the glitch you are about to exclude. Taking
+    every k-th point gives a one-sample spike a (k-1)/k chance of vanishing
+    -- 96% at this reduction. Min/max per bucket keeps the envelope, so the
+    spike is still there.
+    """
+    from stabilis.gui import _decimate
+
+    # Every spike position, not one lucky index: 20 000 happens to be a
+    # multiple of the stride, so stride sampling would have kept *that* one
+    # and the comparison would have proved nothing.
+    kept_by_decimation, kept_by_stride = 0, 0
+    step = 50_000 // 1000
+    for where in range(19_990, 20_030):
+        values = np.zeros(50_000)
+        values[where] = 8.0
+
+        idx, shown = _decimate(values, target=2000)
+        assert shown.size <= 2000
+        if shown.max() == 8.0:
+            kept_by_decimation += 1
+            assert idx[np.argmax(shown)] == where, "kept its original index"
+        if values[::step].max() == 8.0:
+            kept_by_stride += 1
+
+    assert kept_by_decimation == 40, "min/max keeps every spike"
+    assert kept_by_stride <= 2, "stride sampling loses almost all of them"
+
+
+def test_decimation_is_a_no_op_on_a_short_record():
+    from stabilis.gui import _decimate
+
+    values = np.arange(50.0)
+    idx, shown = _decimate(values, target=2000)
+    assert np.array_equal(shown, values)
+    assert np.array_equal(idx, np.arange(50))
+
+
+def test_preview_returns_a_plot_and_a_suggested_grid(server):
+    status, body = post(server, "/api/preview", {
+        "path": "sub/run.dat", "data_kind": "phase", "column": "0",
+        "rate": "1.0", "unit": "s"})
+    assert status == 200, body
+    assert body["n"] == 600
+    assert len(body["png"]) > 1000
+    assert body["shown"] <= 2000
+    assert body["suggest"]["mode"] in ("all", "octave")
+    assert body["suggest"]["why"]
+
+
+def test_preview_reports_file_defects_rather_than_hiding_them(server, tmp_path):
+    _Handler.root = tmp_path.resolve()
+    (tmp_path / "messy.dat").write_text(
+        "1.0 2.0\n3.0\n5.0 NaN\n7.0 8.0\n", encoding="ascii")
+    status, body = post(server, "/api/preview",
+                        {"path": "messy.dat", "column": "0", "rate": "1.0"})
+    assert status == 200, body
+    assert body["defects"] and "short rows" in body["defects"]
+
+
+def test_a_selected_range_is_applied_and_its_equivalent_call_printed(server):
+    """An exclusion that exists only as a mouse gesture is not evidence."""
+    status, body = post(server, "/api/analyze", {
+        "path": "sub/run.dat", "rate": "1.0", "taus": "octave",
+        "start": "100", "stop": "400", "reason": "after warm-up"})
+    assert status == 200, body
+    assert body["prep"]["summary"]["n"] == 300, "only the selection analysed"
+
+    calls = body["prep"]["calls"]
+    assert len(calls) == 1
+    assert "edit.select_range(series, 100, 400" in calls[0]
+    assert "after warm-up" in calls[0], "the reason travels into the code shown"
+
+
+def test_outlier_rejection_from_the_page_marks_gaps_and_is_printed(server,
+                                                                   tmp_path):
+    _Handler.root = tmp_path.resolve()
+    rng = np.random.default_rng(1)
+    x = np.cumsum(rng.standard_normal(2000)) * 1e-12
+    x[1000] += 5e-9
+    np.savetxt(tmp_path / "spike.dat", x, fmt="%.15e")
+
+    status, body = post(server, "/api/analyze", {
+        "path": "spike.dat", "rate": "1.0", "taus": "octave",
+        "outlier_threshold": "6", "reason": "counter glitch"})
+    assert status == 200, body
+    summary = body["prep"]["summary"]
+    assert summary["n"] == 2000, "nothing deleted; the record keeps its length"
+    assert summary["n_gaps"] >= 1, "the spike became a gap"
+    assert any("drop_outliers" in c for c in body["prep"]["calls"])
+
+
+def test_no_preparation_means_no_calls_and_no_claim_of_any(server):
+    status, body = post(server, "/api/analyze", {
+        "path": "sub/run.dat", "rate": "1.0", "taus": "octave"})
+    assert status == 200, body
+    assert body["prep"]["calls"] == []
+    assert body["prep"]["summary"]["n"] == 600
