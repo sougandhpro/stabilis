@@ -607,9 +607,13 @@ def _cmd_plot(args) -> int:
     else:
         result = get("estimator", args.estimator)(
             series, taus=args.taus, max_af=args.max_af)
-        ci = None if args.no_confidence else _confidence_for(
-            argparse.Namespace(confidence=args.confidence, edof_method="auto"),
-            result, series)
+        # MTIE and TIE rms have no chi-square interval, and `confidence`
+        # says so rather than inventing one -- so do not ask.
+        want_ci = not args.no_confidence and result.is_variance
+        ci = _confidence_for(
+            argparse.Namespace(confidence=args.confidence,
+                               edof_method="auto"), result, series
+        ) if want_ci else None
         ax = plotting.sigma_tau(result, confidence=ci,
                                 label=Path(args.path).name)
         if args.slopes:

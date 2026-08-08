@@ -183,3 +183,20 @@ def test_slope_guides_do_not_rescale_the_axis(result):
     plot.slope_guides(ax)
     assert ax.get_xlim() == before_x
     assert ax.get_ylim() == before_y
+
+
+def test_the_plot_command_handles_a_non_variance_estimator(tmp_path):
+    """`stabilis plot --estimator mtie` must not ask for an interval.
+
+    `confidence` refuses a non-variance, correctly and loudly, so the CLI
+    has to know not to ask rather than surfacing that refusal as a crash.
+    """
+    from stabilis.cli import main
+
+    data = tmp_path / "phase.dat"
+    x = np.cumsum(np.random.default_rng(0).standard_normal(400)) * 1e-12
+    np.savetxt(data, x, fmt="%.15e")
+    out = tmp_path / "mtie.png"
+    assert main(["plot", str(data), "--rate", "1.0", "--estimator", "mtie",
+                 "--out", str(out)]) == 0
+    assert out.exists()
