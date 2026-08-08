@@ -268,15 +268,25 @@ def test_negative_variances_are_reported_signed_not_clipped():
     assert any(s.action == "negative_variance" for s in sol.provenance.steps)
 
 
-def test_extreme_value_statistics_are_refused():
-    """MTIE is not a variance and the sum rule is false for it, not inexact."""
+def test_non_variance_statistics_are_refused():
+    """The sum rule holds for variances, and these are not variances.
+
+    Keyed on the `is_variance` flag rather than the name, so an estimator
+    this module has never heard of is caught too -- hence the invented
+    kind here. The message gives the reason *for each* of the two the
+    library ships: they fail differently, and calling both "extreme-value
+    statistics" would be wrong about TIE rms.
+    """
     from dataclasses import replace
 
     results = three_oscillators(1e-24, 1e-24, 1e-24)
-    results = {k: replace(v, kind="mtie") for k, v in results.items()}
-    with pytest.raises(ValueError, match="extreme-value"):
+    disguised = {k: replace(v, kind="peak-to-peak-thing", is_variance=False)
+                 for k, v in results.items()}
+    with pytest.raises(ValueError) as exc:
         solve(make_bench([("A", "B"), ("B", "C"), ("C", "A")], floor=0.0),
-              results)
+              disguised)
+    assert "maximum of a sum" in str(exc.value)
+    assert "frequency offset" in str(exc.value)
 
 
 def test_mixing_estimators_in_one_solve_is_refused():

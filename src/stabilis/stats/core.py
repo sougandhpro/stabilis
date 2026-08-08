@@ -107,10 +107,25 @@ class StabilityResult:
     # masked gap removes terms in a way no formula recovers.
     run_lengths: tuple[int, ...] = ()
     run_terms: tuple[np.ndarray, ...] = ()
+    # Whether `var` really is a variance. False for MTIE and TIE rms, which
+    # this container still carries -- they are sigma-tau curves and belong
+    # on the same plot -- but which must not be fed to anything that
+    # assumes the algebra of variances. The chi-square interval, the
+    # power-law decomposition and the bench solver all check this flag
+    # rather than a list of names, so a plugin estimator cannot slip
+    # through a blacklist that never heard of it.
+    is_variance: bool = True
 
     @property
     def dev(self) -> np.ndarray:
-        """The deviation, sqrt of the stored variance."""
+        """The deviation, sqrt of the stored variance.
+
+        For the two non-variance statistics this is still the quantity you
+        want -- `var` holds the square of the time, so `dev` is MTIE or
+        TIE rms in seconds. Storing the square keeps one container and one
+        plotting path; the `is_variance` flag is what stops anything
+        downstream doing algebra the quantity does not support.
+        """
         return np.sqrt(self.var)
 
     def at(self, af: int) -> float:

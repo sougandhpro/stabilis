@@ -205,6 +205,14 @@ def confidence(
     declined come back on the result and go into provenance. `auto` never
     selects it -- see edof.py.
     """
+    if not result.is_variance:
+        raise ValueError(
+            f"confidence: {result.kind!r} is not a variance, so it has no "
+            "chi-square sampling distribution and this interval would be "
+            "meaningless. An extreme value like MTIE converges to a Gumbel "
+            "law, and its spread grows with record length rather than "
+            "shrinking -- the opposite of what an error bar here implies."
+        )
     if method not in EDOF_METHODS:
         raise ValueError(f"method must be one of {EDOF_METHODS}, got {method!r}")
     if run_policy not in GREENHALL_RUN_POLICIES:

@@ -73,14 +73,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats.add_argument("--json", action="store_true", help="emit JSON")
     p_stats.set_defaults(func=_cmd_stats)
 
-    from .stats import adev, mdev, oadev, ohdev, tdev
+    from .stats import adev, mdev, mtie, oadev, ohdev, tdev, tierms
 
+    # MTIE and TIE rms take no confidence arguments: they are not variances,
+    # so the chi-square interval does not apply and `confidence` refuses
+    # them. Offering the flags and then ignoring them would be worse than
+    # not offering them.
     for name, fn in (
         ("adev", adev),
         ("oadev", oadev),
         ("mdev", mdev),
         ("tdev", tdev),
         ("ohdev", ohdev),
+        ("mtie", mtie),
+        ("tierms", tierms),
     ):
         p = sub.add_parser(name, help=fn.__doc__.splitlines()[0])
         _add_input_args(p)
@@ -92,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
             choices=GAP_POLICIES,
             help="how a gap affects nearby terms; see `stabilis docs gaps`",
         )
+        if name in ("mtie", "tierms"):
+            p.add_argument("--json", action="store_true", help="emit JSON")
+            p.set_defaults(func=_cmd_estimate, estimator=fn,
+                           estimator_name=name, no_confidence=True,
+                           edof_method="auto", confidence=ONE_SIGMA)
+            continue
         p.add_argument(
             "--confidence",
             type=float,
@@ -182,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_plot.add_argument(
         "--estimator", default="oadev",
-        choices=("adev", "oadev", "mdev", "tdev", "ohdev"),
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "mtie", "tierms"),
     )
     p_plot.add_argument("--taus", default="octave", choices=MODES)
     p_plot.add_argument("--max-af", type=int, help="largest averaging factor")
@@ -386,13 +398,16 @@ def _cmd_estimate(args) -> int:
     """
     series = _load(args)
     want_ci = not args.no_confidence
+    extra = {} if args.estimator_name in ("mtie", "tierms") else {
+        "keep_coeffs": want_ci}
     result = args.estimator(
         series,
         taus=args.taus,
         max_af=args.max_af,
-        keep_coeffs=want_ci,
         gap_policy=args.gap_policy,
+        **extra,
     )
+    want_ci = want_ci and result.is_variance
     policy = _step_params(result, "evaluate")
     ci = _confidence_for(args, result, series) if want_ci else None
 

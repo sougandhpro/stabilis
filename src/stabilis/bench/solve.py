@@ -14,10 +14,11 @@ solve rather than separate code:
   only its channel.
 
 **Any estimator that is a variance works for free**, because the sum rule
-holds for anything that is one, and every estimator in `stats/` returns a
-variance with `.var`. What the solver must refuse is MTIE and TIE rms:
-extreme-value statistics for which the sum rule is not approximate but
-false.
+holds for anything that is one. What the solver refuses is anything whose
+result says `is_variance=False` -- MTIE, because the maximum of a sum is
+not the sum of maxima, and TIE rms, because it retains a frequency offset
+that is deterministic rather than adding in quadrature. Two different
+failures, checked by one flag.
 
 **Negative variances are reported, not clipped.** The unconstrained
 least-squares solution is computed alongside the constrained one and
@@ -42,10 +43,17 @@ from .model import Bench
 
 __all__ = ["BenchSolution", "REFUSED_KINDS", "solve", "common_mode_warnings"]
 
-# Statistics that are not variances. The sum rule this solver inverts is
-# false for extreme-value statistics -- the maximum of a sum is not the sum
-# of maxima -- so these are refused rather than fitted badly. Same rule as
-# `stats/powerlaw.py`, for the same reason.
+# Statistics that are not variances, detected by the result's own
+# `is_variance` flag rather than by name so a plugin estimator cannot slip
+# past. The names below are for the error message only.
+#
+# The two this library ships fail for *different* reasons, and saying
+# "extreme-value statistics" of both would be wrong. MTIE is one: the
+# maximum of a sum is not the sum of maxima. TIE rms is a mean square and
+# its stochastic part does obey the sum rule -- it is refused because it
+# retains the frequency offset between the sources, which is deterministic,
+# so two clocks 1e-12 off can differ by 2e-12 or by nothing depending on
+# sign. Neither combines the way this solver assumes.
 REFUSED_KINDS = frozenset({"mtie", "tierms"})
 
 
@@ -194,14 +202,15 @@ def solve(
         raise ValueError("bench.solve: no results given")
 
     kinds = {r.kind for r in results.values()}
-    bad = kinds & REFUSED_KINDS
+    bad = sorted({r.kind for r in results.values() if not r.is_variance})
     if bad:
         raise ValueError(
-            f"bench.solve: {sorted(bad)} cannot be combined this way. The "
-            "sum rule sigma2_meas = sigma2_i + sigma2_j + sigma2_c holds for "
-            "variances; MTIE and TIE rms are extreme-value statistics and it "
-            "is false for them, not merely inaccurate. Refused rather than "
-            "fitted."
+            f"bench.solve: {bad} cannot be combined this way. The sum rule "
+            "sigma2_meas = sigma2_i + sigma2_j + sigma2_c holds for "
+            "variances, and these are not variances -- for MTIE the maximum "
+            "of a sum is not the sum of maxima, and TIE rms retains a "
+            "frequency offset that is deterministic rather than adding in "
+            "quadrature. Refused rather than fitted."
         )
     if len(kinds) > 1:
         raise ValueError(

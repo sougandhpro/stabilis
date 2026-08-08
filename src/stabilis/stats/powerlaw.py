@@ -52,9 +52,11 @@ __all__ = ["PowerLawFit", "WEIGHT_METHODS", "REFUSED_KINDS", "decompose"]
 
 WEIGHT_METHODS = ("edof", "none")
 
-# Statistics that are not variances. The whole model is a sum of variances,
-# and these break the sum rule rather than merely fitting it badly, so they
-# are refused instead of down-weighted. Same rule the M5 bench solver needs.
+# Statistics that are not variances are refused rather than down-weighted:
+# the whole model is a sum of variances and they break the sum rule rather
+# than merely fitting it badly. Detected by the result's `is_variance`
+# flag, not by name, so an estimator this module has never heard of is
+# still caught. The names are kept only for the error message.
 REFUSED_KINDS = frozenset({"mtie", "tierms"})
 
 # Which coefficient table a result's `kind` uses. Anything whose `shape`
@@ -104,12 +106,12 @@ def _rows(result: StabilityResult, f_h: float):
     coefficient is wrong in a way that no residual reports, and a fitted
     number from an invalid row is worse than a missing one.
     """
-    if result.kind in REFUSED_KINDS:
+    if not result.is_variance:
         raise ValueError(
-            f"decompose: {result.kind!r} is not a variance -- it is an "
-            "extreme-value statistic, and the sum over power laws that this "
-            f"fit inverts does not hold for it. Refused rather than fitted. "
-            f"Supply Allan-family results instead ({sorted(REFUSED_KINDS)} "
+            f"decompose: {result.kind!r} is not a variance, so the sum over "
+            "power laws that this fit inverts does not hold for it. Refused "
+            f"rather than fitted. Supply Allan-family results instead "
+            f"({sorted(REFUSED_KINDS)} are the ones this library ships that "
             "are excluded)"
         )
     modified = (result.shape.modified if result.shape is not None

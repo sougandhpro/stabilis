@@ -6,6 +6,7 @@ from .classical import adev, mdev, oadev, ohdev, tdev
 from .core import Shape, StabilityResult
 from .edof import edof, eta1, eta3
 from .greenhall import greenhall_edof, greenhall_edof_pooled
+from .mtie import mtie, tierms
 from .noiseid import NoiseID, identify, identify_curve
 from .powerlaw import PowerLawFit, decompose
 
@@ -17,6 +18,8 @@ __all__ = [
     "mdev",
     "tdev",
     "ohdev",
+    "mtie",
+    "tierms",
     "Confidence",
     "confidence",
     "ONE_SIGMA",

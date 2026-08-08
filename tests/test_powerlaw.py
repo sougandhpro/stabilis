@@ -214,15 +214,20 @@ def test_rows_outside_the_valid_range_are_dropped_and_counted():
     assert "dropped_rows" in [s.action for s in fit.provenance.steps]
 
 
-def test_extreme_value_statistics_are_refused():
-    """MTIE and TIE rms are not variances; the sum rule is false for them."""
-    r = synthetic_curve({0: 1e-24}, 0.0, TAU, F_H, modified=False)
-    for kind in ("mtie", "tierms"):
-        bad = StabilityResult(
-            kind=kind, af=r.af, tau_s=r.tau_s, var=r.var, n_terms=r.n_terms,
-            rate_hz=r.rate_hz, provenance=r.provenance)
-        with pytest.raises(ValueError, match="not a variance"):
-            decompose(bad, f_h=F_H)
+def test_non_variance_statistics_are_refused():
+    """MTIE and TIE rms are not variances; the sum over power laws is false.
+
+    The refusal keys on the result's `is_variance` flag rather than on its
+    name, so this uses the real estimators. `test_mtie.py` separately
+    proves a disguised plugin result is caught by the same check.
+    """
+    from stabilis.stats import mtie, tierms
+    from stabilis.synth import power_law_phase
+
+    ps = power_law_phase(2048, 0, rate_hz=1.0, rng=np.random.default_rng(21))
+    for estimator in (mtie, tierms):
+        with pytest.raises(ValueError, match="is not a variance"):
+            decompose(estimator(ps, taus="octave"), f_h=F_H)
 
 
 def test_too_few_rows_names_the_way_out():
