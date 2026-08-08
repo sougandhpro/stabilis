@@ -42,6 +42,7 @@ except PackageNotFoundError:  # running from a source tree, not installed
 from .provenance import Provenance, Step, new_provenance  # noqa: E402
 from .types import FreqSeries, PhaseSeries, to_frequency, to_phase  # noqa: E402
 from .io import load_frequency, load_phase  # noqa: E402
+from .edit import drop_outliers, select_range, summary  # noqa: E402
 from .preprocess import basic_stats  # noqa: E402
 from .stats import (  # noqa: E402
     ONE_SIGMA,
@@ -72,6 +73,10 @@ __all__ = [
     "load_phase",
     "load_frequency",
     "basic_stats",
+    # preparation
+    "select_range",
+    "drop_outliers",
+    "summary",
     # estimators
     "adev",
     "oadev",
