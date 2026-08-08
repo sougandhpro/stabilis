@@ -70,6 +70,11 @@ class StabilityResult:
     provenance: Provenance
     scale: float = 1.0
     coeffs: tuple[np.ndarray, ...] = ()
+    # Width of one term in phase samples, as a multiple of the averaging
+    # factor: 2m for the Allan family, 3m for Hadamard and modified. It is
+    # the estimator's algebraic limit and also what sets the conservative
+    # EDOF, so it is carried rather than re-derived from `kind`.
+    span_factor: int = 2
 
     @property
     def dev(self) -> np.ndarray:
@@ -228,4 +233,5 @@ def run_estimator(
         provenance=prov,
         scale=scale,
         coeffs=tuple(coeff_list),
+        span_factor=hard_limit_divisor,
     )

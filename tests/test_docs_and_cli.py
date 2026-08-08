@@ -117,3 +117,66 @@ def test_cli_reports_bad_input_without_a_traceback(tmp_path, capsys):
     p.write_text("1.0\n2.0\n")
     assert main(["stats", str(p)]) == 1  # no --rate, no --time-column
     assert "stabilis:" in capsys.readouterr().err
+
+
+def _noise_file(tmp_path, n=512, alpha=0, seed=5):
+    import numpy as np
+
+    from stabilis.synth import power_law_freq
+
+    p = tmp_path / "y.txt"
+    y = power_law_freq(n, alpha, rate_hz=1.0, rng=np.random.default_rng(seed)).y
+    np.savetxt(p, y, fmt="%.15e")
+    return p
+
+
+def test_cli_prints_stable32_style_bounds(tmp_path, capsys):
+    """AF / Tau / # / Min Sigma / Sigma / Max Sigma, plus EDOF.
+
+    The first six columns mirror Stable32 so a migrating user can diff the
+    two outputs directly. EDOF is the extra one, and is the point: it says
+    how much data each bound rests on.
+    """
+    p = _noise_file(tmp_path)
+    assert main(["oadev", str(p), "--kind", "frequency", "--rate", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "Min OADEV" in out and "Max OADEV" in out and "EDOF" in out
+    assert "68.2689% confidence" in out
+    body = [ln for ln in out.splitlines() if not ln.startswith(("#", " " * 5 + "AF"))]
+    for line in body:
+        af, tau, n, lo, dev, hi, eta, via = line.split()
+        assert float(lo) <= float(dev) <= float(hi)
+        assert via in ("eta1", "eta3")
+
+
+def test_cli_confidence_level_widens_the_bounds(tmp_path, capsys):
+    p = _noise_file(tmp_path)
+    args = ["oadev", str(p), "--kind", "frequency", "--rate", "1", "--json"]
+    assert main(args + ["--confidence", "0.6827"]) == 0
+    one = json.loads(capsys.readouterr().out)["confidence"]
+    assert main(args + ["--confidence", "0.9545"]) == 0
+    two = json.loads(capsys.readouterr().out)["confidence"]
+    assert all(b < a for a, b in zip(one["dev_lo"], two["dev_lo"]))
+    assert all(b > a for a, b in zip(one["dev_hi"], two["dev_hi"]))
+
+
+def test_cli_no_confidence_falls_back_to_the_plain_table(tmp_path, capsys):
+    p = _noise_file(tmp_path)
+    assert main(
+        ["oadev", str(p), "--kind", "frequency", "--rate", "1", "--no-confidence"]
+    ) == 0
+    out = capsys.readouterr().out
+    assert "Min OADEV" not in out and "OADEV" in out
+
+
+def test_cli_json_carries_the_edof_and_the_method(tmp_path, capsys):
+    p = _noise_file(tmp_path)
+    assert main(
+        ["oadev", str(p), "--kind", "frequency", "--rate", "1", "--json"]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    ci = payload["confidence"]
+    assert len(ci["edof"]) == len(payload["af"])
+    assert set(ci["edof_method"]) <= {"eta1", "eta3"}
+    actions = [s["action"] for s in payload["provenance"]["steps"]]
+    assert "confidence" in actions

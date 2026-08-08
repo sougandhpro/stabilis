@@ -16,7 +16,9 @@ from .docs import list_topics, read_topic, topic_summary
 from .log import configure
 from .preprocess import basic_stats
 from .provenance import to_dict
+from .stats import ONE_SIGMA, confidence
 from .stats.core import GAP_POLICIES
+from .stats.edof import EDOF_METHODS
 from .tau import MODES
 
 __all__ = ["main", "build_parser"]
@@ -67,6 +69,24 @@ def build_parser() -> argparse.ArgumentParser:
             default="auto",
             choices=GAP_POLICIES,
             help="how a gap affects nearby terms; see `stabilis docs gaps`",
+        )
+        p.add_argument(
+            "--confidence",
+            type=float,
+            default=ONE_SIGMA,
+            help="confidence level for the sigma bounds (default: 1 sigma, 0.6827)",
+        )
+        p.add_argument(
+            "--edof-method",
+            default="auto",
+            choices=EDOF_METHODS,
+            help="degrees-of-freedom estimator; see `stabilis docs edof`",
+        )
+        p.add_argument(
+            "--no-confidence",
+            action="store_true",
+            help="skip the bounds; also frees the coefficient arrays, which "
+            "matter on a record of millions of points",
         )
         p.add_argument("--json", action="store_true", help="emit JSON")
         p.set_defaults(func=_cmd_estimate, estimator=fn, estimator_name=name)
@@ -165,36 +185,47 @@ def _step_params(result, action: str) -> dict:
 def _cmd_estimate(args) -> int:
     """Run one estimator and print the tau table.
 
-    Column layout deliberately mirrors Stable32's, so a user migrating can
-    diff the two outputs directly. Confidence bounds arrive in M2; until
-    then the header says so rather than leaving a suggestive blank.
+    Column layout deliberately mirrors Stable32's -- AF, Tau, #, Min Sigma,
+    Sigma, Max Sigma -- so a user migrating can diff the two outputs
+    directly. The extra EDOF column is not in Stable32's output and is the
+    point of difference: it says how much data each bound rests on, and
+    which estimator produced it.
     """
     series = _load(args)
+    want_ci = not args.no_confidence
     result = args.estimator(
         series,
         taus=args.taus,
         max_af=args.max_af,
-        keep_coeffs=False,
+        keep_coeffs=want_ci,
         gap_policy=args.gap_policy,
     )
     policy = _step_params(result, "evaluate")
+    ci = (
+        confidence(result, level=args.confidence, method=args.edof_method)
+        if want_ci
+        else None
+    )
 
     if args.json:
-        print(
-            json.dumps(
-                {
-                    "kind": result.kind,
-                    "af": result.af.tolist(),
-                    "tau_s": result.tau_s.tolist(),
-                    "var": result.var.tolist(),
-                    "dev": result.dev.tolist(),
-                    "n_terms": result.n_terms.tolist(),
-                    "provenance": to_dict(result.provenance),
-                },
-                indent=2,
-                default=str,
-            )
-        )
+        payload = {
+            "kind": result.kind,
+            "af": result.af.tolist(),
+            "tau_s": result.tau_s.tolist(),
+            "var": result.var.tolist(),
+            "dev": result.dev.tolist(),
+            "n_terms": result.n_terms.tolist(),
+            "provenance": to_dict((ci or result).provenance),
+        }
+        if ci is not None:
+            payload["confidence"] = {
+                "level": ci.level,
+                "edof": ci.edof.tolist(),
+                "edof_method": list(ci.method),
+                "dev_lo": ci.dev_lo.tolist(),
+                "dev_hi": ci.dev_hi.tolist(),
+            }
+        print(json.dumps(payload, indent=2, default=str))
         return 0
 
     print(f"# {result.kind.upper()} for {args.path}")
@@ -204,10 +235,27 @@ def _cmd_estimate(args) -> int:
             f"# {series.n_gaps} gaps, {policy['runs']} gap-free runs, "
             f"policy '{policy['gap_policy']}', longest run {policy['longest_run']}"
         )
-    print("# confidence bounds not yet implemented (M2)")
-    print(f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}  {result.kind.upper():>14}")
-    for af, tau, n, dev in zip(result.af, result.tau_s, result.n_terms, result.dev):
-        print(f"{af:>7}  {tau:>13.4e}  {n:>8}  {dev:>14.6e}")
+    name = result.kind.upper()
+    if ci is None:
+        print(f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}  {name:>14}")
+        for af, tau, n, dev in zip(result.af, result.tau_s, result.n_terms, result.dev):
+            print(f"{af:>7}  {tau:>13.4e}  {n:>8}  {dev:>14.6e}")
+        return 0
+
+    print(f"# bounds at {ci.level:.4%} confidence, chi-square on data-driven EDOF")
+    print(
+        f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}  {'Min ' + name:>14}  "
+        f"{name:>14}  {'Max ' + name:>14}  {'EDOF':>9}  {'via':>5}"
+    )
+    rows = zip(
+        result.af, result.tau_s, result.n_terms, ci.dev_lo, result.dev,
+        ci.dev_hi, ci.edof, ci.method,
+    )
+    for af, tau, n, lo, dev, hi, eta, how in rows:
+        print(
+            f"{af:>7}  {tau:>13.4e}  {n:>8}  {lo:>14.6e}  {dev:>14.6e}  "
+            f"{hi:>14.6e}  {eta:>9.1f}  {how:>5}"
+        )
     return 0
 
 
