@@ -21,11 +21,46 @@ theory/powerlaw.md).
 Defined for **even** `m` with `10 <= m <= N-1`, and -- the part that trips
 people up --
 
-    tau = 0.75 * (m - 1) * tau0
+    tau = 0.75 * m * tau0
 
 **not** `m*tau0`. Thêo1 is the one estimator here whose averaging time is
 not the averaging factor times the sampling interval, which is why it does
 not go through `run_estimator` like the rest.
+
+**SP 1065 prints that averaging time two ways, on facing pages.** Page 29,
+under eq. (30): "Thêo1 is the rms of frequency differences averaged over an
+averaging time tau = 0.75 (m - 1) tau0". Page 30, twice: "The averaging
+time, tau, associated with a Thêo1 value is tau = 0.75*m*tau0", and again
+under eq. (31), "the effective tau for a Thêo1 estimation is tau =
+0.75*m*tau0". The Thêo1 EDF table takes `r = 0.75m` as well. This library
+followed the `(m-1)` printing first; it is wrong, and three independent
+arguments say so:
+
+* **Its own eq. (33).** ThêoBR averages `AVAR(m = 9+3i) / Thêo1(m = 12+4i)`,
+  a ratio that means nothing unless the two are at the same tau. Under
+  `0.75 m tau0` the Thêo1 term sits at `0.75(12+4i) = (9+3i) tau0`, exactly
+  the AVAR term. Under `0.75(m-1) tau0` it sits at `(8.25+3i) tau0`, which
+  pairs with nothing.
+* **The headline claim.** Thêo1 is advertised as reaching 75 % of the
+  record. At the largest `m = N-1` the first reading gives exactly
+  `0.75 (N-1) tau0 = 0.75 T`; the second falls short of it.
+* **Measurement.** Thêo1 is unbiased against AVAR for white FM (Table 2,
+  `a = 1.00, b = c = 0`). Over 60 realizations at N = 8192, Thêo1 against
+  AVAR interpolated to each candidate tau:
+
+      m      at 0.75(m-1)tau0     at 0.75 m tau0
+      10          0.901               1.002
+      12          0.917               1.002
+      16          0.938               0.999
+      24          0.960               1.000
+
+  The `(m-1)` reading is low by exactly the `(m-1)/m` factor it introduces.
+  The two converge as `m` grows, which is why this survived a test suite
+  that checked unbiasedness only for `m >= 100`.
+
+This is the third place SP 1065 has been found to misprint by measurement
+rather than by inspection -- after the flicker-PM conversion row and the
+`0.75` missing from eq. (30) below.
 
 **Why it exists.** The Allan variance stops at `tau = (N-1)/2 * tau0`,
 because it needs two adjacent averaging windows inside the record. Thêo1
@@ -73,8 +108,13 @@ def theo1_afs(n: int, max_af: int | None = None) -> np.ndarray:
 
 
 def theo1_taus(afs, rate_hz: float) -> np.ndarray:
-    """`tau = 0.75 (m-1) tau0`, the definition's own averaging time."""
-    return 0.75 * (np.asarray(afs, dtype=np.float64) - 1.0) / rate_hz
+    """`tau = 0.75 m tau0`, the definition's own averaging time.
+
+    Not `0.75 (m-1) tau0`, which SP 1065 also prints -- see the module
+    docstring for the three independent reasons it is the minority reading
+    and the measurement that settles it.
+    """
+    return 0.75 * np.asarray(afs, dtype=np.float64) / rate_hz
 
 
 def _theo1_one(x: np.ndarray, m: int, tau0: float) -> tuple[float, int]:

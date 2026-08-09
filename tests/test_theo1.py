@@ -27,15 +27,59 @@ def test_averaging_factors_are_even_and_at_least_ten():
     assert theo1_afs(8).size == 0, "too short to have any valid m"
 
 
-def test_tau_is_three_quarters_of_m_minus_one():
+def test_tau_is_three_quarters_of_m():
     """The definition's own averaging time, and the usual place to slip.
 
     Thêo1 is the one estimator here whose tau is not `m * tau0`. Getting
     this wrong shifts every point along the axis and the curve still looks
-    entirely plausible.
+    entirely plausible -- which is how `0.75(m-1)tau0`, the reading SP 1065
+    prints once against `0.75 m tau0` twice, survived here for a while. See
+    `test_which_tau_thêo1_actually_sits_at` and the module docstring.
     """
-    assert theo1_taus([10, 100], 1.0).tolist() == [6.75, 74.25]
-    assert theo1_taus([10], 10.0).tolist() == [0.675], "scales with tau0"
+    assert theo1_taus([10, 100], 1.0).tolist() == [7.5, 75.0]
+    assert theo1_taus([10], 10.0).tolist() == [0.75], "scales with tau0"
+
+
+def test_the_largest_tau_is_exactly_three_quarters_of_the_record():
+    """`m = N-1` gives `0.75 (N-1) tau0`, and `T = (N-1) tau0`.
+
+    The advertised reach is exact under this tau convention and falls short
+    under the other one, which is one of the three arguments against it.
+    """
+    ps = power_law_phase(512, 0, rate_hz=1.0, rng=np.random.default_rng(2))
+    t = theo1(ps)
+    record_s = (ps.n - 1) / ps.rate_hz
+    assert t.af[-1] == ps.n - 1, "the largest even m at or below N-1"
+    assert t.tau_s[-1] / record_s == 0.75, "exactly, not approximately"
+
+
+@pytest.mark.slow
+def test_which_tau_theo1_actually_sits_at():
+    """SP 1065 prints it both ways; this is the measurement that decides.
+
+    Thêo1 is unbiased against AVAR for white FM -- its Table 2 row is
+    `a = 1.00, b = c = 0`. AVAR goes as 1/tau there, so the two candidate
+    taus differ by `m/(m-1)`: 11 % at m = 10, and vanishing by m = 100,
+    which is why this must be measured at *small* m to say anything.
+
+    Measured 0.901 vs 1.002 at m = 10 over 60 realizations of N = 8192.
+    """
+    n, trials = 8192, 24
+    top = 40  # small m, where the two readings actually differ
+    ratio_m1, ratio_m = [], []
+    for seed in range(trials):
+        ps = power_law_phase(n, 0, rate_hz=1.0,
+                             rng=np.random.default_rng(200 + seed))
+        t = theo1(ps, max_af=top)
+        a = oadev(ps, taus="all", max_af=top, keep_coeffs=False)
+        logt, logv = np.log(a.tau_s), np.log(a.var)
+        for m, v in zip(t.af, t.var):
+            at = lambda tau: float(np.exp(np.interp(np.log(tau), logt, logv)))
+            ratio_m1.append(v / at(0.75 * (m - 1)))
+            ratio_m.append(v / at(0.75 * m))
+
+    assert np.median(ratio_m) == pytest.approx(1.0, abs=0.02)
+    assert np.median(ratio_m1) < 0.97, "the (m-1) reading is biased low"
 
 
 def test_it_reaches_three_quarters_of_the_record():
