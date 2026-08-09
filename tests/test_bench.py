@@ -90,6 +90,149 @@ def test_one_diagonal_fixes_the_ring_and_both_are_offered():
     assert check(fixed).identifiable
 
 
+def test_two_records_against_a_common_reference_determine_all_three():
+    """The odd-cycle theorem is about the variances, not about the records.
+
+    `x_ab = x_ac - x_bc` identically, so a pair measured against a shared
+    third is one subtraction away from the edge that closes the triangle.
+    This is how the three-cornered hat is normally run -- two channels
+    against the house clock -- and the check has to say so rather than send
+    the user off to buy a counter.
+    """
+    from stabilis.bench.graph import derivable_edges
+
+    chain = make_bench([("A", "C"), ("B", "C")], floor=0.0)
+    ident = check(chain)
+    assert not ident.identifiable            # from the variances alone
+    assert ("A", "B") in ident.suggestions
+
+    assert derivable_edges(chain) == (("A", "B", "C", "m0", "m1"),)
+    assert ident.derivable == (("A", "B", "C", "m0", "m1"),)
+    assert "no new data" in ident.report()
+    assert "m0 - m1" in ident.report()
+
+    # And it is the edge that fixes it.
+    assert check(make_bench([("A", "C"), ("B", "C"), ("A", "B")],
+                            floor=0.0)).identifiable
+
+
+def test_a_ring_of_four_needs_no_new_data_either():
+    """Both diagonals of the 4-cycle are subtractions of adjacent sides."""
+    from stabilis.bench.graph import derivable_edges
+
+    ring = make_bench([("A", "B"), ("B", "C"), ("C", "D"), ("D", "A")],
+                      floor=0.0)
+    pairs = {(a, b) for a, b, _via, _ma, _mb in derivable_edges(ring)}
+    assert pairs == {("A", "C"), ("B", "D")}
+    assert {(e[0], e[1]) for e in check(ring).derivable} == pairs
+
+
+def test_an_edge_already_measured_is_not_offered_as_derivable():
+    """A triangle is done. Nothing to construct, and nothing to suggest."""
+    from stabilis.bench.graph import derivable_edges
+
+    triangle = make_bench([("A", "B"), ("B", "C"), ("A", "C")], floor=0.0)
+    assert derivable_edges(triangle) == ()
+    assert check(triangle).derivable == ()
+    assert check(triangle).identifiable
+
+
+def test_a_back_to_back_run_derives_nothing():
+    """Both ends on one clock says nothing about any *pair*, so it cannot
+    stand in as the shared reference of a subtraction."""
+    from stabilis.bench.graph import derivable_edges
+
+    bench = make_bench([("A", "A"), ("B", "B")], floor=0.0)
+    assert derivable_edges(bench) == ()
+
+
+def _two_record_bench(seed=3, n=200_000):
+    """Two records against a common reference, and the third by subtraction."""
+    from stabilis.types import PhaseSeries
+
+    rng = np.random.default_rng(seed)
+    levels = {"A": 3e-12, "B": 1e-12, "C": 6e-12}
+    x = {k: np.cumsum(rng.standard_normal(n)) * v for k, v in levels.items()}
+    ac = x["A"] - x["C"]
+    bc = x["B"] - x["C"]
+    ab = ac - bc                      # constructed; no third counter exists
+    np.testing.assert_allclose(ab, x["A"] - x["B"], rtol=0, atol=1e-24)
+
+    bench = make_bench([("A", "C"), ("B", "C"), ("A", "B")], floor=0.0)
+    results = {
+        "m0": oadev(PhaseSeries(ac, rate_hz=1.0), taus="octave"),
+        "m1": oadev(PhaseSeries(bc, rate_hz=1.0), taus="octave"),
+        "m2": oadev(PhaseSeries(ab, rate_hz=1.0), taus="octave"),
+    }
+    return bench, results, levels
+
+
+def test_the_derived_triangle_inverts_to_the_closed_form_exactly():
+    """The hat from two records is an identity, and holds to machine precision.
+
+    With the channel floors declared zero the 3x3 system has a closed-form
+    inverse — `sigma2_C = (V_ac + V_bc - V_ab)/2` and its two rotations — so
+    this needs no tolerance and no seed argument. It is the sharpest
+    statement available that the derived edge is real information rather
+    than a restatement of the two rows it came from: if it were dependent,
+    the system would be singular and there would be nothing to invert.
+
+    Asserted against the **unconstrained** solution, because that is the one
+    the closed form describes. At the longest tau here the formula goes
+    slightly negative — a quiet clock differenced against loud ones, with
+    two degrees of freedom left — and NNLS is obliged to return zero there.
+    Checking the constrained answer would therefore be testing the clip, not
+    the algebra; the two agree wherever the physics permits, which is
+    asserted separately below.
+    """
+    bench, results, _levels = _two_record_bench()
+    solution = solve(bench, results)
+
+    v_ac, v_bc, v_ab = (results[k].var for k in ("m0", "m1", "m2"))
+    expected = {"A": (v_ac + v_ab - v_bc) / 2,
+                "B": (v_bc + v_ab - v_ac) / 2,
+                "C": (v_ac + v_bc - v_ab) / 2}
+    for name, want in expected.items():
+        np.testing.assert_allclose(solution.signed_var(name), want,
+                                   rtol=1e-12, atol=0)
+
+    # Where the closed form is physical for *every* clock, the constrained
+    # answer is the closed form. The mask is over all three together rather
+    # than per clock: NNLS is one joint solve, so pinning a negative source
+    # at zero moves its partners at that same tau -- they are not
+    # independent columns to be checked one at a time.
+    physical = np.all([want >= 0.0 for want in expected.values()], axis=0)
+    assert physical.any() and not physical.all()
+    for name, want in expected.items():
+        np.testing.assert_allclose(
+            solution.source_var[physical, solution.sources.index(name)],
+            want[physical], rtol=1e-12, atol=0)
+    assert solution.any_negative                    # reported, not hidden
+
+
+def test_the_hat_recovers_three_clocks_from_two_measured_records():
+    """End to end, with the third row constructed rather than measured.
+
+    White FM at three levels, so `sigma(tau) = level/sqrt(tau)` is the
+    closed-form truth and no reference table is involved.
+
+    **B gets a looser bound than A and C, and that is the physics rather
+    than slack.** It is the quietest clock by a factor of three and six, so
+    the hat determines it as a small difference of large numbers and its
+    error is dominated by its partners' noise -- the effect measured and
+    propagated in `theory/bench.md`, where the quiet source of a comparable
+    triple came out at 53 % against a predicted 77 %. A single tolerance
+    across all three would be scoring the choice of oscillators.
+    """
+    bench, results, levels = _two_record_bench()
+    solution = solve(bench, results)
+
+    for name, rtol in (("A", 0.03), ("C", 0.03), ("B", 0.10)):
+        got = solution.dev(name)[:4]
+        truth = levels[name] / np.sqrt(solution.tau_s[:4])
+        np.testing.assert_allclose(got, truth, rtol=rtol)
+
+
 def test_a_chain_is_a_tree_and_is_equally_hopeless():
     ident = check(make_bench([("A", "B"), ("B", "C")], floor=0.0))
     assert not ident.identifiable

@@ -47,7 +47,14 @@ def to_dict(bench: Bench) -> dict:
             {**asdict(s), "spec_adev": [list(p) for p in s.spec_adev]}
             for s in bench.sources
         ],
-        "devices": [asdict(d) for d in bench.devices],
+        # `asdict` recurses into a tuple field and hands back a tuple, so
+        # `channels` needs the same explicit widening `spec_adev` gets above.
+        # `json.dumps` writes either as an array, so no file on disk changes
+        # -- but a caller that compares two `to_dict` results, or hands one
+        # to something other than the JSON writer, sees a tuple where this
+        # docstring promised a list.
+        "devices": [{**asdict(d), "channels": [asdict(c) for c in d.channels]}
+                    for d in bench.devices],
         "measurements": [asdict(m) for m in bench.measurements],
     }
 

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from . import analysis, expr, files, prepare
+from . import analysis, bench, expr, files, prepare
 from .request import floats, labels_for, rate_for, specs, table_for
 
 __all__ = ["estimators", "capabilities", "GET_ROUTES", "POST_ROUTES"]
@@ -57,6 +57,7 @@ def capabilities(root, query: dict) -> dict:
     The estimator list, the tau grids and the unit tables all live in the
     engine. Fetching them means the page has no second copy to drift.
     """
+    from ..bench.model import SCHEMA_VERSION
     from ..tau import MODES
 
     return {
@@ -64,6 +65,10 @@ def capabilities(root, query: dict) -> dict:
         "tau_modes": list(MODES),
         "units": {"phase": list(prepare.PHASE_UNITS),
                   "frequency": list(prepare.FREQ_UNITS)},
+        # So a bench the page writes carries the version the library would
+        # have written, rather than a number typed into a script that then
+        # has to be remembered when the layout changes.
+        "bench_schema": SCHEMA_VERSION,
     }
 
 
@@ -178,4 +183,7 @@ def _stats(values: np.ndarray, spans) -> dict:
 
 GET_ROUTES = {"/api/files": list_files, "/api/capabilities": capabilities}
 POST_ROUTES = {"/api/open": open_file, "/api/traces": traces,
-               "/api/analyze": analysis.analyze}
+               "/api/analyze": analysis.analyze,
+               "/api/bench/check": bench.check_bench,
+               "/api/bench/solve": bench.solve_bench,
+               "/api/bench/load": bench.load_bench}

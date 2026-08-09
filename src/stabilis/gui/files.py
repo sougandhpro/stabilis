@@ -29,17 +29,28 @@ from pathlib import Path
 import numpy as np
 
 __all__ = ["safe_path", "listing", "load_table", "column_facts", "timebase",
-           "Table", "cache_clear", "DATA_SUFFIXES"]
+           "Table", "cache_clear", "cache_bytes", "DATA_SUFFIXES"]
 
 # Extensions offered in the file browser. Not a security control -- `safe_path`
 # is -- just a way to keep the listing readable in a directory full of
 # unrelated files.
 DATA_SUFFIXES = (".dat", ".txt", ".csv", ".tsv", ".phase", ".freq", "")
 
-# How many files stay resident. Four is enough to flip between a record and
-# its reference without re-reading either, and small enough that a page left
-# open overnight does not hold a gigabyte hostage.
-CACHE_SIZE = 4
+# What stays resident, budgeted in bytes rather than in files.
+#
+# A count was right when the page looked at one record at a time. A bench is
+# the case that broke it: six measurements from six counters is six files,
+# all of them wanted on every solve, and a four-slot cache evicts the one it
+# is about to need -- so every solve re-read and re-parsed the lot. Counting
+# files also mismeasures the thing actually at risk, since four 2 GB records
+# is not the same commitment as four 2 MB ones.
+#
+# So: keep whatever fits under a byte budget, evicting least-recently-used,
+# and always keep at least one table however large it is -- a single record
+# bigger than the budget must still be usable, and refusing to cache it
+# would mean re-reading it on every keystroke.
+CACHE_BYTES = 512 << 20
+MIN_CACHED = 1
 
 _CACHE: "OrderedDict[tuple, Table]" = OrderedDict()
 _LOCK = threading.Lock()
@@ -62,6 +73,10 @@ class Table:
     has_header: bool
     n: int
     n_columns: int
+    # Whether `_read` dropped a phantom first row, below. Carried because a
+    # printed recipe that reads the file back has to drop it too, and
+    # "there was a header" is not the same condition as "a row was removed".
+    header_row_dropped: bool = False
 
 
 def safe_path(root: Path, candidate: str) -> Path:
@@ -105,9 +120,27 @@ def load_table(path: Path, delimiter: str | None = None) -> Table:
     with _LOCK:
         _CACHE[key] = table
         _CACHE.move_to_end(key)
-        while len(_CACHE) > CACHE_SIZE:
-            _CACHE.popitem(last=False)
+        _evict()
     return table
+
+
+def _evict() -> None:
+    """Drop least-recently-used tables until the budget is met.
+
+    Caller holds `_LOCK`. `MIN_CACHED` is what stops a record larger than
+    the whole budget from evicting itself the instant it arrives, which
+    would turn every request touching it into a re-read.
+    """
+    total = sum(t.rows.nbytes for t in _CACHE.values())
+    while total > CACHE_BYTES and len(_CACHE) > MIN_CACHED:
+        _key, dropped = _CACHE.popitem(last=False)
+        total -= dropped.rows.nbytes
+
+
+def cache_bytes() -> int:
+    """Bytes currently held. For the tests, and for answering "why is this big"."""
+    with _LOCK:
+        return sum(t.rows.nbytes for t in _CACHE.values())
 
 
 def cache_clear() -> None:
@@ -141,7 +174,8 @@ def _read(path: Path, delimiter: str | None) -> Table:
     # has said the file names its columns, *and* the first row parsed as
     # nothing at all. A genuine all-gap first sample in a headed file sits
     # at row 1, not row 0, so it survives.
-    if named and rows.shape[0] and not np.isfinite(rows[0]).any():
+    dropped = bool(named and rows.shape[0] and not np.isfinite(rows[0]).any())
+    if dropped:
         rows = rows[1:]
         note = _without_header_row(note, rows.shape[1])
 
@@ -155,6 +189,7 @@ def _read(path: Path, delimiter: str | None) -> Table:
         has_header=named,
         n=int(rows.shape[0]),
         n_columns=int(rows.shape[1]),
+        header_row_dropped=dropped,
     )
 
 

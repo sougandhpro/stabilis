@@ -148,3 +148,49 @@ pre.calls { background: var(--page); border: 1px solid var(--line);
 .legend i { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
 
 .busy { opacity: .55; pointer-events: none; }
+
+/* ------------------------------------------------------- stage 4: the bench */
+
+/* The verdict is the one thing on the page worth colouring, because it is a
+ * yes/no that changes with every edit and the whole stage exists to make it
+ * visible before any data is collected. */
+pre.calls.good { border-color: var(--accent); }
+pre.calls.bad { border-color: var(--bad); color: var(--bad); }
+
+#sourcelist td, #measlist td, .device td { padding: 2px 3px; }
+#sourcelist input, #measlist input, #measlist select,
+.device input { padding: 4px 6px; font-size: 12px; }
+#sourcelist th, #measlist th { text-align: left; font-weight: 600;
+                               color: var(--muted); font-size: 11px;
+                               padding: 0 3px 3px; }
+#measlist tr.sel > td { background: var(--page); }
+
+.device { border: 1px solid var(--faint); border-radius: 5px; padding: 8px;
+          margin-bottom: 8px; }
+.device > .row { margin-bottom: 5px; }
+.device > .row > input { flex: 1; }
+.device > .row > button { flex: none; }
+
+/* The data editor is a panel inside a panel, so it needs to read as nested
+ * rather than as a sibling that happens to be below. */
+.panel.inset { background: var(--page); margin: 10px 0 0; }
+
+#benchresults table.numbers td.warn { color: var(--bad); font-weight: 600; }
+
+/* A pair you can construct is good news, so it is not painted as a warning
+ * the way a pair needing new hardware is. */
+ul.derived { margin: 4px 0 0; padding-left: 20px; }
+ul.derived li { margin: 2px 0; }
+
+/* The per-measurement file picker. Its own list rather than the sidebar's,
+ * because a bench row is usually a different file in a different folder
+ * from whatever stage 1 has open. */
+.picker { border: 1px solid var(--line); border-radius: 4px; margin: 6px 0;
+          max-height: 190px; overflow-y: auto; }
+.picker div { padding: 4px 8px; cursor: pointer; font-size: 12.5px;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker div:hover { background: var(--page); }
+.picker .dir { color: var(--muted); }
+.picker .empty { color: var(--muted); font-style: italic; cursor: default; }
+
+#mdwindows { margin-top: 8px; }

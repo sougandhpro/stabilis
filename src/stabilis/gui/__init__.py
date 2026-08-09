@@ -17,7 +17,7 @@ Every variance, every degree of freedom and every confidence bound comes
 from `stats/`, through the same calls the CLI makes, so the page and the
 command line cannot disagree.
 
-The work is arranged as three stages, which is the order the questions
+The work is arranged as four stages, which is the order the questions
 actually arrive in:
 
 1. **Data** -- pick a file, confirm what its columns are called, look at
@@ -29,12 +29,32 @@ actually arrive in:
 3. **Analyse** -- run an estimator over what stage 2 produced, and read the
    result off an interactive curve with the table and the equivalent script
    beside it.
+4. **Bench** -- describe the setup instead of the file: which oscillators,
+   which instruments and channels, and which measurement is which pair.
+   Says whether the setup can separate its clocks at all *before* any data
+   is read, then assigns each measurement a file and a column and solves
+   the N-cornered hat.
+
+Stage 4 is the only one that looks at several files at once, and it is the
+one that must assume least about them. Stages 1-3 examine a file the user
+just chose and is already looking at; a bench is six exports from six
+instruments, each with its own delimiter, timebase, dropouts and glitch.
+So the delimiter, the units, the timebase, the kept stretches and the
+outlier threshold are all *per measurement*, the record is drawn before it
+is solved, and what each file needed tolerating is reported against the row
+it belongs to rather than once for the bench.
+
+Stage 4 is the one place the page touches `stabilis.bench`, and it does so
+as a client like everything else here: it strips each measurement to its
+column itself and hands `bench.solve` a mapping of finished results, which
+is all that function has ever wanted. See `bench.py`.
 
 Modules: `files` reaches the disk and caches what it read, `expr` parses
 column arithmetic without an evaluator, `prepare` turns columns into series
 the library accepts, `request` reads the settings every endpoint is sent,
 `api` serves the reading and drawing endpoints, `analysis` is the one that
-runs an estimator, `server` is the HTTP and the bind, and `assets/` is the
+runs an estimator, `bench` is the setup stage and `benchdata` the half of it
+that reaches a file, `server` is the HTTP and the bind, and `assets/` is the
 page itself.
 """
 

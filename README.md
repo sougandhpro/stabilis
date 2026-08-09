@@ -86,7 +86,7 @@ figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M3 complete, M5's bench model, and the measurement report.** 844
+**M0–M3 complete, M5's bench model, and the measurement report.** 913
 tests; `stabilis validate` 31/31.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
@@ -106,7 +106,9 @@ legitimately be quoted. Since then:
   N-cornered hat and instrument noise-floor subtraction become one
   non-negative solve per τ, and `stabilis bench check` refuses a setup
   that cannot separate its oscillators, naming the one extra measurement
-  that would fix it, *before any data is collected*.
+  that would fix it, *before any data is collected* — and saying which of
+  those you already have, since two clocks against a common reference are
+  one subtraction away from the edge that closes the triangle.
 - **MTIE and TIE rms**, by binary doubling: 10⁶ points over 18 octave τ in
   0.15 s, where the naive form is O(N·m) per τ.
 - **TOTVAR** with its published bias correction, and **Thêo1 / ThêoBR /
@@ -209,7 +211,7 @@ stabilis gui                     # opens http://127.0.0.1:8765
 stabilis gui --root ~/data       # confine the file browser to one tree
 ```
 
-A local page in three stages, which is the order the questions arrive in.
+A local page in four stages, which is the order the questions arrive in.
 
 **1 · Data.** Pick a file. It is read **once**, and everything after that is
 a slice of an array already in memory. If it has a header those names are
@@ -228,6 +230,30 @@ file's columns into the quantity of interest.
 **3 · Analyse.** Run an estimator over what stage 2 produced and read the
 answer off an interactive log-log curve, all series on one axis or each on
 its own.
+
+**4 · Bench.** Describe the *setup* rather than the file — which
+oscillators, which counters and channels, and which record is which pair —
+and get the N-cornered hat out of it. The identifiability verdict is
+recomputed on every edit, **before any data is read**, because "go and
+measure B against D" is cheap advice on a Tuesday and expensive advice
+after a fortnight of logging. A chain and a four-clock ring are told they
+determine nothing however long they run, and both diagonals are offered as
+the fix. The classical three-cornered hat is shown for what it is: four
+unknowns against three rows until you either declare the channel floor —
+the assumption the textbook method makes silently — or add the
+back-to-back run that measures it.
+
+Crucially, the advice distinguishes **the pairs you must go and measure
+from the pairs you already have**. The odd-cycle theorem is about the
+variances, not about the records: `x_ab = x_ac − x_bc` identically, so two
+clocks measured against a common reference are one subtraction away from
+the edge that closes the triangle. That is how the hat is normally run —
+two channels against the house clock, the third pair formed in software —
+and the reference need not be special, since C can be the local clock and
+the hat still returns `σ_C`. A four-clock ring turns out to need no new
+data either. `stabilis bench check` names the two rows to subtract, and
+states the two conditions the graph cannot check: the records must overlap
+in time, and a derived row carries both channels' noise.
 
 Every selection prints **the equivalent non-interactive call**, so the
 session is reproducible and doubles as how you learn the API:
@@ -274,6 +300,35 @@ factor, plausibly and silently; where the values fit more than one format
 the page refuses and asks rather than choosing. Units are the same story: a
 `ns` file analysed as `s` is wrong by a factor of a billion and looks
 entirely reasonable on a log axis.
+
+Stage 4 is the only stage that reads several files at once, and it assumes
+the least about them. The others examine a file you just picked and are
+already looking at; a bench is six exports from six instruments, so the
+delimiter, units, timebase, kept stretches and outlier threshold are all
+**per measurement**. The record is drawn before it is solved — min/max
+envelope, so a one-sample glitch survives — and stretches are kept by
+dragging rather than by typing indices at a record you cannot see. Several
+stretches become one gapped record, never two curves, because a measurement
+is one row of the bench. What each file needed tolerating, how many points
+were gaps, how many the outlier threshold removed and how far its timetags
+wander are reported against the row they belong to.
+
+One trap that costs an afternoon: a timebase in **MJD needs an explicit
+rate**. Day number 59000 has a float64 spacing of 6.3e-7 s, so a 1 Hz grid
+infers as 0.99999976 Hz, and its taus then miss round numbers by more than
+the solver's tolerance — against a counter given an exact 1 Hz the two
+share no averaging time at all. The refusal is correct, since nothing is
+interpolated onto a common grid; the page adds the rates it used, how each
+was obtained, and the fix.
+
+Stage 4 needs no new field on `Measurement` for the columns it assigns,
+because `bench.solve` is handed *results* and never opens a file. The page
+strips each measurement to its data column itself — expression, pedestal,
+units, crop — and hands over a mapping of finished results. The column
+belongs to the file; the bench describes the experiment; recording both in
+`bench.json` would create the one place they could disagree. Saving hands
+the JSON to your browser's downloads: this server reads your disk and never
+writes to it.
 
 It computes nothing you would quote. Every variance, degree of freedom and
 confidence bound comes from `stats/`, through the same calls the CLI makes,

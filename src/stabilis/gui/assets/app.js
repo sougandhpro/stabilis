@@ -545,6 +545,11 @@ for (const tab of document.querySelectorAll("#stages button"))
       section.classList.toggle("on", section.id === "stage" + S.stage);
     if (S.stage === 1) { rawPlot.draw(); refreshRaw(); }
     if (S.stage === 2) refreshPrep();
+    /* Stage 4 lives in bench.js, which loads after this file. Called through
+     * a name check rather than imported, because these are classic scripts
+     * sharing one global lexical scope and the page must still work if that
+     * file is ever dropped. */
+    if (S.stage === 4 && typeof benchEnter === "function") benchEnter();
   };
 
 async function loadCapabilities() {
@@ -558,6 +563,7 @@ async function loadCapabilities() {
     "<option" + (m === S.taus ? " selected" : "") + ">" + esc(m)
     + "</option>").join("");
   renderUnits();
+  if (typeof benchCapabilities === "function") benchCapabilities(j);
 }
 
 renderUnits();

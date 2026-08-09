@@ -894,6 +894,7 @@ def _cmd_bench_check(args) -> int:
             "components": [list(c) for c in ident.components],
             "bipartite": list(ident.bipartite),
             "suggestions": [list(p) for p in ident.suggestions],
+            "derivable": [list(e) for e in ident.derivable],
             "notes": list(ident.notes),
         }, indent=2))
     else:

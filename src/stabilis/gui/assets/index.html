@@ -27,6 +27,7 @@
     <button data-stage="1" class="on">1 &middot; Data</button>
     <button data-stage="2">2 &middot; Prepare</button>
     <button data-stage="3">3 &middot; Analyse</button>
+    <button data-stage="4">4 &middot; Bench</button>
   </nav>
 
   <!-- ------------------------------------------------ stage 1: the record -->
@@ -144,9 +145,82 @@
     </div>
     <div id="results"></div>
   </section>
+
+  <!-- ------------------------------------------- stage 4: the bench itself -->
+  <section id="stage4" class="stage">
+    <div class="split">
+      <div class="panel">
+        <h2>clocks</h2>
+        <p class="tiny muted">The oscillators, masers and GPSDOs on the
+          bench. An <code>id</code> is all that is needed; it is what the
+          measurements below refer to.</p>
+        <table id="sourcelist"></table>
+        <button id="addsource" class="inline">+ clock</button>
+
+        <h2>instruments</h2>
+        <p class="tiny muted">Channels belong to an instrument because that
+          ownership is what makes the common-mode check possible &mdash; two
+          channels of one counter share a timebase, an LO and a supply, so
+          their noise does <b>not</b> cancel in the hat. Leave a floor blank
+          to solve for it; a back-to-back run measures it from data.</p>
+        <div id="devicelist"></div>
+        <button id="adddevice" class="inline">+ instrument</button>
+
+        <h2>bench file</h2>
+        <div class="row">
+          <input id="benchpath" placeholder="bench.json, under the root">
+          <button id="benchload" class="inline">Open</button>
+        </div>
+        <button id="benchsave" class="inline ghost">Save bench.json</button>
+        <p class="tiny muted">Saving hands the file to your browser's
+          downloads &mdash; this server reads your disk and never writes to
+          it. What comes down is what <code>stabilis bench check</code>
+          reads.</p>
+        <p id="benchfile" class="tiny"></p>
+      </div>
+
+      <div class="panel grow">
+        <h2>measurements</h2>
+        <p class="tiny muted">One row per record: two clocks, one channel.
+          <b>Naming the same clock at both ends is legal and useful</b> &mdash;
+          that is a back-to-back run, and it is how a channel's noise floor
+          gets measured rather than assumed.</p>
+        <table id="measlist"></table>
+        <button id="addmeas" class="inline">+ measurement</button>
+        <div id="measdata"></div>
+
+        <h2>can this bench separate its clocks?</h2>
+        <p class="tiny muted">Answered from the graph alone, before any file
+          is read &mdash; which is while the answer is still cheap to act on.</p>
+        <pre id="benchverdict" class="calls"></pre>
+        <div id="benchadvice"></div>
+
+        <div class="row wrap">
+          <div><label for="benchest">estimator</label>
+            <select id="benchest"></select></div>
+          <div><label for="benchtaus">tau grid</label>
+            <select id="benchtaus"></select></div>
+          <div><label for="benchmaxaf">max averaging factor</label>
+            <input id="benchmaxaf" placeholder="auto"></div>
+        </div>
+        <div class="row wrap">
+          <div class="chk"><input type="checkbox" id="benchforce">
+            <label for="benchforce">solve even if unidentifiable</label></div>
+          <button id="benchgo">Solve</button>
+        </div>
+        <p class="tiny muted">Forcing a singular bench returns one of
+          infinitely many answers that fit equally well. It is offered
+          because you may want to see it; it is off by default because you
+          should not be able to reach it by accident.</p>
+      </div>
+    </div>
+    <div id="benchresults"></div>
+  </section>
 </main>
 
 <script src="plot.js"></script>
 <script src="app.js"></script>
+<script src="bench.js"></script>
+<script src="benchdata.js"></script>
 </body>
 </html>

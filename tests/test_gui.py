@@ -94,6 +94,8 @@ def post(base, path, payload):
 def test_the_page_and_its_two_scripts_are_served(server):
     for path, needle in [("/", "stabilis"), ("/app.js", "createPlot"),
                          ("/plot.js", "function createPlot"),
+                         ("/bench.js", "function benchEnter"),
+                         ("/benchdata.js", "function renderDataEditor"),
                          ("/app.css", "--ink")]:
         with urllib.request.urlopen(server + path) as r:
             assert r.status == 200
@@ -653,7 +655,7 @@ def test_the_gui_matches_the_library_called_by_hand(server, tree):
 def test_every_asset_the_page_asks_for_exists():
     """A missing file here is a blank page with nothing saying why."""
     page = (ASSETS / "index.html").read_text(encoding="utf-8")
-    for name in ("app.css", "plot.js", "app.js"):
+    for name in ("app.css", "plot.js", "app.js", "bench.js", "benchdata.js"):
         assert name in page
         assert (ASSETS / name).is_file()
 

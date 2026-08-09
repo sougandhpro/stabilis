@@ -149,6 +149,155 @@ specification. They are a **claim, not a measurement**, are never mixed
 into a fit, and the validation-integrity rule applies to them exactly as it
 does to published reference tables.
 
+## Two records are enough: the derived edge
+
+The odd-cycle theorem above is a statement about what the **variances
+alone** determine. It is not a statement about what the **records**
+determine, and the difference is the whole of ordinary practice.
+
+Measure A and B against a common reference C. Then
+
+    x_ab(t) = x_ac(t) - x_bc(t)
+
+*identically* — the reference cancels term by term — so the third edge of
+the triangle costs a subtraction rather than a counter. And that edge
+closes an odd cycle, which is exactly what the bipartite component was
+missing. Two records determine three clocks:
+
+| | equation |
+|---|---|
+| measured | `Var(AC) = σ²_A + σ²_C` |
+| measured | `Var(BC) = σ²_B + σ²_C` |
+| derived  | `Var(AC − BC) = σ²_A + σ²_B` |
+| ⇒ | `σ²_C = (Var(AC) + Var(BC) − Var(AB)) / 2` |
+
+This is not a trick. **It is how the three-cornered hat is normally run**:
+two channels against the house clock, the third pair formed in software.
+Nor does the shared reference have to be special — C can be the local clock
+everything is plugged into, and the hat still returns `σ_C`. The reference
+is an unknown like any other, which is the point of the method.
+
+The derived row is a genuinely new *equation* while being no new *data*.
+Equivalently, and more revealingly: `Var(r₁ − r₂) = Var(r₁) + Var(r₂) −
+2·Cov(r₁, r₂)`, so forming the difference is precisely a way of using the
+**cross-covariance** between the two records — the information the solver
+throws away when it looks at each record's own variance in isolation. Full
+cross-variance estimation arrives with `multi/`; differencing is the part
+available today, and it is exact.
+
+`derivable_edges` reports these, and `check` marks them separately from the
+pairs that genuinely need new data, because "subtract two columns" and "buy
+a counter and log for a fortnight" should not print as the same advice. A
+four-clock ring turns out to need no new data either: both diagonals are
+derivable.
+
+Two conditions the graph cannot check, so the report states them:
+
+* **Simultaneity.** The subtraction means nothing unless the two records
+  overlap in time on a common timebase. `Measurement` carries an epoch
+  string and no duration, so verifying that here would be inventing a
+  capability — the same reason `_overlapping_epochs` trusts only exact
+  equality.
+* **The channel term.** A derived record carries the noise of *both*
+  contributing channels: `Var = σ²_a + σ²_b + σ²_c1 + σ²_c2`. A
+  `Measurement` names one channel, so the design row would count one.
+  Declare the floors — zero is the classical hat's silent assumption, and
+  writing it down is what makes it visible — or give the derived row its own
+  channel whose floor is the sum. Note that when the two channels share an
+  instrument their common-mode part *cancels* in the difference, so
+  `σ²_c1 + σ²_c2` is an upper bound there.
+
+One numerical footnote. The cancellation is exact in algebra and to about
+`1e-25 s` in float64 on pedestal-free phase; on columns each carrying a
+0.35 s pedestal it is exact only to `5.5e-17 s`, because the subtraction
+happens at the pedestal's magnitude rather than the signal's. That is
+`1.8e-5` of ADEV at `tau0 = 1 s` for a 3e-12 clock — negligible, but it is
+the same float64 hazard `precision.md` describes, and it is why the library
+removes the pedestal before scaling units.
+
+## Building one interactively
+
+`stabilis gui`, stage 4, is the same model with the graph drawn as you edit
+it. Clocks and instruments on the left, one measurement per row on the
+right, and the identifiability verdict recomputed on every keystroke —
+which is the whole point, because that verdict is worth most **while the
+experiment is still being planned**, not after a fortnight of logging.
+
+The one design decision worth recording is where the file-reading lives.
+`bench.solve` takes a `{measurement id -> StabilityResult}` mapping and
+never opens a file; it has no notion of a column, a unit or a header, and
+must not grow one. So the page strips each measurement down to its data
+column itself — expression, pedestal, units, crop — and by the time
+anything in `bench/` is called, a measurement is an array with a sample
+rate.
+
+That is why `Measurement` carries no column index. The alternative was to
+add one and bump the schema, and it would have been the wrong trade: the
+column belongs to *this file*, the bench describes *the experiment*, and a
+`bench.json` that recorded both would be the only place the two could
+disagree. What the page prints instead is the full recipe — `read_table`,
+the numpy expression, the pedestal, the unit factor, the estimator call —
+so the session reproduces exactly without the mouse, and
+`tests/test_gui_bench.py` runs that recipe by hand and demands identical
+numbers back.
+
+Two things the page reports that the rank alone would misrepresent:
+
+* **An empty bench is trivially identifiable.** Rank 0 of 0 unknowns is
+  consistent and says nothing about any clock, so the measurement count
+  comes back beside the verdict and the page says so in words.
+* **A clock nobody measures has no column in the solve.** Not an error —
+  benches get written before data is taken — but it is named rather than
+  silently dropped.
+
+### Six counters, six formats, none of them clean
+
+Stage 4 is the only part of the page that looks at several files at once,
+and the one that must assume least about them. Every other stage examines a
+file the user just chose and is already looking at. A bench is six exports
+from six instruments: six delimiters, six ideas of a timestamp, six sets of
+dropouts, and a glitch at the moment somebody opened the rack door.
+
+So the delimiter, the units, the timebase and format, the kept stretches
+and the outlier threshold are **per measurement**, not per bench. The
+record is drawn — min/max envelope, so a single-sample spike in two million
+points survives decimation — before it is solved, and stretches are kept by
+dragging rather than by typing indices at a record you cannot see. Several
+kept stretches become **one gapped record**, never two curves, because a
+measurement is one row of the bench; nothing between them is interpolated.
+
+What each file needed tolerating to be read at all, how many points were
+gaps, how many an outlier threshold removed, and how far its timetags
+wander from a clean grid are all reported against the row they belong to.
+"Something was tolerated somewhere" is not actionable when the something
+belongs to one of six counters.
+
+Two consequences worth writing down:
+
+* **A timebase in MJD needs an explicit rate.** Day number 59000 has a
+  float64 spacing of 7.3e-12 d = 6.3e-7 s, so a 1 Hz grid infers as
+  0.99999976 Hz. `af/rate` then misses an exact 1.000 s by far more than
+  the nanosecond tolerance `_common_taus` allows, and against a row given
+  an exact 1 Hz the two share *no* averaging time at all. The solver is
+  right to refuse — it interpolates nothing — but the refusal alone does
+  not say why two counters that both ran at 1 Hz disagree. The page adds
+  the rates it used, how each was obtained, and the fix. This is the same
+  float64 hazard as `precision.md`, met on the timestamp column instead of
+  the phase column.
+* **The file cache is budgeted in bytes, not in files.** A count was right
+  when the page looked at one record at a time; a bench wants all of its
+  files on every solve, so a four-slot cache evicted the one it was about
+  to need. A count also mismeasures the risk, since four 2 GB records is
+  not four 2 MB ones. One table is always kept however large, or a record
+  bigger than the budget would be re-read on every keystroke.
+
+The page reads bench files and never writes one: saving hands the JSON to
+the browser's downloads. The server binds to localhost because a file
+reader is already worth confining, and a file writer would be a different
+conversation. What comes down is `store.to_dict` output, round-tripped
+through the library on the last check, so a bench the model would reject
+cannot be saved at all.
+
 ## Independence from `stats/`
 
 **`stats/` must never import `bench/`.** An AST test over the whole `stats`
@@ -177,6 +326,12 @@ layer and becomes a dependency of every ADEV anyone computes.
 * MTIE, mixed estimators, unidentifiable benches, benches with no common
   tau, unknown schema versions and changed data files are each refused with
   a directed message.
+
+`tests/test_gui_bench.py` covers the interactive path over real HTTP: the
+graph verdicts again through the endpoint, the hat recovering three clocks
+of known level, the printed recipe run by hand for bit-identical numbers,
+`tau0_s` on the bench overriding a rate typed on the page, and every
+refusal above surfacing as a message rather than a traceback.
 
 ### How accurate is the hat, really
 

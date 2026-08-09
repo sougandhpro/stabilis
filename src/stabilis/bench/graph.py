@@ -51,7 +51,8 @@ import numpy as np
 
 from .model import Bench
 
-__all__ = ["Identifiability", "design_matrix", "check", "suggest_edge"]
+__all__ = ["Identifiability", "design_matrix", "check", "suggest_edge",
+           "derivable_edges"]
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,9 @@ class Identifiability:
     null_space: np.ndarray
     suggestions: tuple[tuple[str, str], ...]
     notes: tuple[str, ...]
+    # Suggestions that cost no new data, only a subtraction. See
+    # `derivable_edges`; each is `(a, b, via, m_a, m_b)`.
+    derivable: tuple[tuple[str, str, str, str, str], ...] = ()
 
     @property
     def identifiable(self) -> bool:
@@ -96,6 +100,17 @@ class Identifiability:
             lines.append(f"  component {{{', '.join(comp)}}}: {state}")
         for note in self.notes:
             lines.append(f"  note: {note}")
+        if self.derivable:
+            lines.append(
+                "  these need no new data -- the record is a subtraction of "
+                "two you already have:")
+            for a, b, via, m_a, m_b in self.derivable:
+                lines.append(
+                    f"    {a} vs {b} = {m_a} - {m_b}  (both against {via})")
+            lines.append(
+                "    valid only if those two ran simultaneously on a common "
+                "timebase, and the derived row's channel term is the sum of "
+                "both channels' -- see theory/bench.md.")
         if self.suggestions:
             pairs = ", ".join(f"{a} vs {b}" for a, b in self.suggestions)
             lines.append(f"  add any one of these measurements: {pairs}")
@@ -233,6 +248,9 @@ def check(bench: Bench) -> Identifiability:
         )
 
     suggestions = suggest_edge(bench) if rank < n_unknowns else ()
+    derivable = (tuple(e for e in derivable_edges(bench)
+                       if (e[0], e[1]) in suggestions)
+                 if suggestions else ())
     return Identifiability(
         sources=sources,
         channels=channels,
@@ -243,7 +261,63 @@ def check(bench: Bench) -> Identifiability:
         null_space=null,
         suggestions=suggestions,
         notes=tuple(notes),
+        derivable=derivable,
     )
+
+
+def derivable_edges(bench: Bench) -> tuple[tuple[str, str, str, str, str], ...]:
+    """Pairs obtainable by subtracting two records rather than measuring one.
+
+    **The odd-cycle theorem is about the variances, not about the records.**
+    Given `x_ac` and `x_bc` as time series, `x_ab = x_ac - x_bc` identically,
+    because the common reference cancels. So any two sources measured against
+    a shared third are one subtraction away from a third edge -- and that
+    edge closes a triangle, which is an odd cycle, which is exactly what a
+    bipartite component was missing.
+
+    This is not a trick, it is *how the three-cornered hat is normally run*:
+    two counters against the house clock, and the third pair formed in
+    software. It also means the common reference need not be special. C can
+    be the local clock everything is plugged into, and the hat still returns
+    `sigma_C` -- the reference is an unknown like any other.
+
+    Two conditions the graph cannot check, and which the report states
+    rather than assumes:
+
+    * **Simultaneity.** The subtraction is only meaningful if the two
+      records overlap in time on a common timebase. `Measurement` carries an
+      epoch string and no duration, so claiming to verify that here would be
+      inventing a capability -- the same reason `_overlapping_epochs` only
+      trusts exact equality.
+    * **The channel term.** A derived record carries the noise of *both*
+      contributing channels: `Var = sigma2_a + sigma2_b + sigma2_c1 +
+      sigma2_c2`. A `Measurement` names one channel, so the design row would
+      count one. Declare the floors -- zero is the classical hat's silent
+      assumption -- or give the derived row its own channel whose floor is
+      the sum.
+    """
+    measured = {
+        frozenset((m.source_a, m.source_b)): m.id
+        for m in bench.measurements if not m.is_back_to_back
+    }
+    partners: dict[str, list[tuple[str, str]]] = {}
+    for m in bench.measurements:
+        if m.is_back_to_back:
+            continue
+        partners.setdefault(m.source_a, []).append((m.source_b, m.id))
+        partners.setdefault(m.source_b, []).append((m.source_a, m.id))
+
+    out, seen = [], set()
+    for via in bench.measured_sources:
+        reach = sorted(partners.get(via, []))
+        for i, (a, m_a) in enumerate(reach):
+            for b, m_b in reach[i + 1:]:
+                pair = frozenset((a, b))
+                if a == b or pair in measured or pair in seen:
+                    continue
+                seen.add(pair)
+                out.append((a, b, via, m_a, m_b))
+    return tuple(out)
 
 
 def suggest_edge(bench: Bench) -> tuple[tuple[str, str], ...]:
