@@ -323,3 +323,80 @@ def test_cli_theo_family_runs_without_interval_flags(tmp_path, capsys, name):
     with pytest.raises(SystemExit):
         main([name, str(p), "--kind", "phase", "--rate", "1", "--confidence",
               "0.95"])
+
+
+def _two_channel_files(tmp_path, n=2048, seed=21):
+    """One clock under two channels' noise, written as two phase files."""
+    import numpy as np
+
+    from stabilis.synth import power_law_phase
+
+    rng = np.random.default_rng(seed)
+    clock = power_law_phase(n, 0, 1.0, rng, 1e-24)
+    paths = []
+    for name in ("ch_a.txt", "ch_b.txt"):
+        p = tmp_path / name
+        np.savetxt(p, clock.x + power_law_phase(n, 2, 1.0, rng, 1e-22).x,
+                   fmt="%.15e")
+        paths.append(str(p))
+    return paths
+
+
+def test_cli_cross_puts_both_autos_beside_the_cross(tmp_path, capsys):
+    """The table has to show the rejection, not assert it.
+
+    Printing the cross alone would leave a reader unable to tell a good
+    measurement from a broken one; the two single-channel columns are what
+    make the gap visible.
+    """
+    a, b = _two_channel_files(tmp_path)
+    assert main(["cross", a, b, "--rate", "1", "--max-af", "8"]) == 0
+    out = capsys.readouterr().out
+    assert "sigma_a" in out and "sigma_b" in out and "rej dB" in out
+    assert "independent" in out, "the assumption must be on the output"
+    body = [ln for ln in out.splitlines()
+            if ln and not ln.startswith("#") and "tau (s)" not in ln]
+    assert len(body) == 4
+    # The cross sits under both autos at short tau -- that is the point.
+    for line in body:
+        sigma_a, sigma_b, cross = (float(v) for v in line.split()[1:4])
+        assert cross < min(sigma_a, sigma_b)
+
+
+def test_cli_cross_json_carries_the_error_bar_and_the_assumption(tmp_path, capsys):
+    a, b = _two_channel_files(tmp_path)
+    assert main(["cross", a, b, "--rate", "1", "--max-af", "8", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "cross_oadev"
+    assert len(payload["sem"]) == len(payload["var"]) == len(payload["tau_s"])
+    assert set(payload["edof_method"]) <= {"eta1", "eta3"}
+    steps = [s["action"] for s in payload["provenance"]["steps"]]
+    assert "independence_assumed" in steps
+    assert "cross_variance" in steps
+
+
+def test_cli_cross_reads_a_different_column_from_the_second_file(tmp_path, capsys):
+    """Two counters rarely export the same layout."""
+    import numpy as np
+
+    a, b = _two_channel_files(tmp_path)
+    wide = tmp_path / "wide.txt"
+    col = np.loadtxt(b)
+    np.savetxt(wide, np.column_stack([np.zeros_like(col), col]), fmt="%.15e")
+    assert main(["cross", a, str(wide), "--rate", "1", "--max-af", "4",
+                 "--column-b", "1", "--json"]) == 0
+    from_wide = json.loads(capsys.readouterr().out)
+    assert main(["cross", a, b, "--rate", "1", "--max-af", "4", "--json"]) == 0
+    assert from_wide["var"] == json.loads(capsys.readouterr().out)["var"]
+
+
+def test_cli_cross_refuses_an_estimator_with_no_cross_form(tmp_path):
+    """Caught by the parser's choice list, so it never reaches the library.
+
+    `cross_variance` refuses MTIE too, and has its own test for it. Both
+    guards are wanted: this one names the alternatives in the usage message
+    instead of raising after the files have been read.
+    """
+    a, b = _two_channel_files(tmp_path, n=512)
+    with pytest.raises(SystemExit):
+        main(["cross", a, b, "--rate", "1", "--estimator", "mtie"])

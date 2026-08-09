@@ -86,8 +86,8 @@ figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M3 complete, M5's bench model, and the measurement report.** 913
-tests; `stabilis validate` 31/31.
+**M0–M3 complete, M5's bench model and cross-variances, and the
+measurement report.** 947 tests; `stabilis validate` 32/32.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -109,6 +109,15 @@ legitimately be quoted. Since then:
   that would fix it, *before any data is collected* — and saying which of
   those you already have, since two clocks against a common reference are
   one subtraction away from the edge that closes the triangle.
+- **Cross-variances** — two channels watching one clock, so the
+  instruments' own noise cancels in expectation instead of forming a floor
+  you cannot get under. Neither Stable32 nor `allantools` has this. Because
+  every estimator already returns its coefficient array, cross-AVAR,
+  cross-MVAR, cross-HVAR and cross-TVAR are one function: the auto case is
+  `mean(c²)` and the cross case is `mean(c_a·c_b)`. The estimate is signed
+  and goes negative at long τ, which is reported rather than clipped, and
+  its error bar is not chi-square but an Isserlis form that reduces exactly
+  to the chi-square one when the two channels are the same channel.
 - **MTIE and TIE rms**, by binary doubling: 10⁶ points over 18 octave τ in
   0.15 s, where the naive form is O(N·m) per τ.
 - **TOTVAR** with its published bias correction, and **Thêo1 / ThêoBR /
@@ -162,9 +171,56 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — `fit.py` and the multi-dataset layer (`multi/`), which gives the
-bench model real data to solve. Instrument readers wait on paired vendor
+**Next** — `fit.py`, and the rest of `multi/`: alignment and the
+cross-variance are in, the N-channel sweep and the software rejection of a
+multi-channel capture are not. Instrument readers wait on paired vendor
 exports.
+
+## Cross-variances
+
+```bash
+stabilis cross channel_a.dat channel_b.dat --rate 1
+```
+
+Two channels watching one clock. Write each as the clock plus that
+channel's own measurement noise,
+
+    x_a = x_c + n_a          x_b = x_c + n_b
+
+and the auto-variance of either is `σ²_c + σ²_n` — the instrument is a
+floor no amount of logging gets under. The cross term is not: the
+difference operator is linear, so `E[d_a·d_b] = E[d_c²]` when the two
+channels' noise is independent. **The instrument contribution has
+expectation zero rather than being small.** That is what a
+cross-correlation phase noise test set does in hardware; here it applies to
+any two-channel capture.
+
+On a synthetic clock a factor of three under its channels' noise, at
+τ = 1 s: the single-channel answer reads 2.08e-12, the cross reads
+7.07e-13, and the clock that generated both is 6.98e-13.
+
+Three prices, printed rather than hidden:
+
+- **The estimate is signed.** A mean of products, not of squares, so at
+  long τ it goes negative — a real result meaning the shared part is below
+  the scatter. Nothing clips it, and the deviation column prints `--`
+  rather than `sqrt(|var|)`, which would draw a noise floor that is not
+  there.
+- **Convergence is slow.** Only the *estimate* of the instrument noise
+  averages down, as `M^(1/4)` in amplitude. The table's `rej dB` column is
+  the rejection actually achieved, and it reduces to the familiar
+  `5·log10(M)` law as a consequence of the error bar rather than as a
+  substitute for one.
+- **Correlated channels break it silently.** A shared reference, a shared
+  supply, one thermal environment: the answer is simply wrong with no
+  symptom in the data, and no arrangement of the two records tests it. The
+  assumption is a provenance warning on every call.
+
+The error bar cannot be the chi-square one — a sum of products is unbounded
+below. It comes from Isserlis' theorem instead, and reduces *exactly* to
+`σ²√(2/η)` when the two channels are the same channel, so `cross_variance(a,
+a)` returns the auto-variance bit for bit. See `stabilis docs cross`, which
+also tabulates the estimator that was tried first and rejected.
 
 ## The measurement report
 

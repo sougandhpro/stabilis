@@ -236,6 +236,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_pl.add_argument("--json", action="store_true", help="emit JSON")
     p_pl.set_defaults(func=_cmd_powerlaw)
 
+    p_x = sub.add_parser(
+        "cross",
+        help="cross-variance of two channels watching one clock, which "
+             "rejects the instruments' own noise",
+    )
+    _add_input_args(p_x)
+    p_x.add_argument("path_b", help="the second channel's data file")
+    p_x.add_argument(
+        "--column-b", type=int,
+        help="data column in the second file, if it differs from --column",
+    )
+    p_x.add_argument(
+        "--estimator", default="oadev",
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev"),
+        help="any variance estimator; MTIE and TIE rms have no cross form",
+    )
+    p_x.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
+    p_x.add_argument("--max-af", type=int, help="largest averaging factor")
+    p_x.add_argument("--json", action="store_true", help="emit JSON")
+    p_x.set_defaults(func=_cmd_cross)
+
     p_plot = sub.add_parser("plot", help="plot a data file (needs matplotlib)")
     _add_input_args(p_plot)
     p_plot.add_argument(
@@ -718,6 +739,67 @@ def _cmd_powerlaw(args) -> int:
                 else f"{fit.dominant:+d} ({ALPHA_NAMES[fit.dominant]})")
     print(f"\n# dominant at the shortest fitted tau: {dominant}")
     print(f"# residual {fit.residual:.4e}, KKT optimality {fit.kkt:.2e}")
+    return 0
+
+
+def _cmd_cross(args) -> int:
+    """Cross-variance of two records of one clock, seen through two channels.
+
+    Prints the two auto-deviations beside the cross so the rejection is
+    visible rather than asserted: where the cross sits well below both, the
+    instruments' noise has been removed from the answer. Negative points
+    print as `--` in the deviation column, because there is no deviation
+    there and a number would invite one to be read.
+    """
+    from .multi import cross_variance
+
+    a = _load(args)
+    column_b = args.column if args.column_b is None else args.column_b
+    b = _load(argparse.Namespace(**{**vars(args), "path": args.path_b,
+                                    "column": column_b}))
+    cross = cross_variance(a, b, args.estimator, taus=args.taus,
+                           max_af=args.max_af)
+
+    if args.json:
+        print(json.dumps({
+            "kind": cross.kind,
+            "tau_s": cross.tau_s.tolist(),
+            "af": cross.af.tolist(),
+            "var": cross.var.tolist(),
+            "sem": cross.sem.tolist(),
+            "auto_a": cross.auto_a.tolist(),
+            "auto_b": cross.auto_b.tolist(),
+            "eta": cross.eta.tolist(),
+            "edof_method": list(cross.edof_method),
+            "correlation": cross.correlation.tolist(),
+            "rejection_db": cross.rejection_db.tolist(),
+            "n_terms": cross.n_terms.tolist(),
+            "provenance": to_dict(cross.provenance),
+        }, indent=2, default=str))
+        return 0
+
+    print(f"# {cross.kind} of {args.path} against {args.path_b}")
+    print("# WARNING: this assumes the two channels' noise is independent of "
+          "each other and of")
+    print("#          the clock. A shared reference, supply or thermal "
+          "environment breaks that")
+    print("#          silently -- no arrangement of these two records can "
+          "test it.")
+    print(f"\n{'tau (s)':>12} {'sigma_a':>12} {'sigma_b':>12} {'cross':>12} "
+          f"{'+/- (var)':>12} {'rho':>7} {'rej dB':>7} {'eta':>10}")
+    for i, tau in enumerate(cross.tau_s):
+        dev = "--" if cross.var[i] <= 0.0 else f"{cross.dev[i]:.4e}"
+        print(f"{tau:12.6g} {np.sqrt(cross.auto_a[i]):12.4e} "
+              f"{np.sqrt(cross.auto_b[i]):12.4e} {dev:>12} "
+              f"{cross.sem[i]:12.4e} {cross.correlation[i]:7.3f} "
+              f"{cross.rejection_db[i]:7.2f} {cross.eta[i]:10.1f}")
+    n_neg = int(cross.negative.sum())
+    if n_neg:
+        print(f"\n# {n_neg} of {cross.tau_s.size} points came out negative and "
+              "have no deviation. That is")
+        print("# ordinary at long tau: the common part is below the scatter "
+              "of the estimate.")
+    print("\n# see `stabilis docs cross` for the error bar and what it assumes")
     return 0
 
 

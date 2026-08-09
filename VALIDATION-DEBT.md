@@ -148,6 +148,37 @@ risk figure, and must not be read as having done so.
 
 ---
 
+## 5. The cross-variance has no interop check and no hardware check
+
+**Status: open, and one half of it can never close.**
+
+`multi/cross.py` is validated functionally — the self-cross identity is
+exact against a path already certified to 14 digits, the rejection is
+measured against the synthetic clock that generated the common part, and
+the error bar is measured against Monte-Carlo scatter (`theory/cross.md`
+tabulates all three). What it has no equivalent of is item 1's parity
+tier, and for a structural reason: **neither Stable32 nor `allantools`
+computes a cross-variance**, so there is no published table and no second
+implementation to differ from. Manufacturing one from this library's own
+output would make the assertion a statement about itself.
+
+That half stays open permanently and is not a defect; it is the price of
+being first, and it is why the functional evidence is heavier here than
+elsewhere.
+
+The half that *can* close is hardware. Every measurement so far uses
+independent synthetic noise, which is precisely the assumption the method
+rests on — so the tests confirm the arithmetic and say nothing about
+whether two real channels are independent. **A two-channel capture from
+the 3120A, ideally with the two channels deliberately sharing a reference
+in one run and not in another, is the acceptance test**: the shared-
+reference run must show the rejection failing, and if it does not, the
+warning this library prints is not detecting the thing it warns about.
+That pairing is the same shape as item 3's, and would arrive with the same
+data.
+
+---
+
 ## Not debt
 
 For the avoidance of doubt, these are *already* validated and are not

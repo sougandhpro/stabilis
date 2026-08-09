@@ -54,7 +54,8 @@ from ..stats.bias import deviation_bias_factor
 from ..stats.core import StabilityResult
 from ..stats.edof import eta1
 from ..stats.greenhall import greenhall_edof
-from ..synth import _kasdin_walter_impulse, _unit_h_alpha, power_law_freq
+from ..synth import (_kasdin_walter_impulse, _unit_h_alpha, power_law_freq,
+                     power_law_phase)
 from ..types import FreqSeries, PhaseSeries
 from .certified import (
     certified_deviation,
@@ -504,7 +505,79 @@ def _coverage(trials: int) -> list[Check]:
     out.append(_h_alpha_round_trip(ensembles, trials))
     out.append(_decomposition_round_trip(trials))
     out.append(_bench_hat_round_trip())
+    out.append(_cross_sees_under_the_instrument(trials))
     return out
+
+
+def _cross_sees_under_the_instrument(trials: int) -> Check:
+    """A clock buried under its channels' noise, recovered by the product.
+
+    The claim that distinguishes this library from every other tool in the
+    field, so it is scored against the record that actually generated the
+    common part rather than against a fit. Two things are measured at once:
+    how far the auto-variance is wrong, which is the size of the problem,
+    and how far the cross is wrong, which is the size of the answer.
+
+    Scored at the shortest taus only. That is not a convenience -- it is
+    where the instrument dominates and therefore the only place the
+    rejection is being tested at all. By long tau the clock has emerged
+    from the noise and both estimates are right, which would flatter the
+    method by averaging in the region where it does nothing.
+    """
+    from ..multi import cross_variance
+
+    rng = np.random.default_rng(SEEDS["coverage"] + 1300)
+    n, rate = 4096, 1.0
+    h_clock, h_inst = 1.0e-24, 1.0e-22
+    runs = max(trials // 10, 20)
+    auto_err, cross_err, worst_sigma, rejection = [], [], 0.0, []
+    for _ in range(runs):
+        clock = power_law_phase(n, 0, rate, rng, h_clock)
+        a = PhaseSeries(x=clock.x + power_law_phase(n, 2, rate, rng, h_inst).x,
+                        rate_hz=rate)
+        b = PhaseSeries(x=clock.x + power_law_phase(n, 2, rate, rng, h_inst).x,
+                        rate_hz=rate)
+        cross = cross_variance(a, b, max_af=8)
+        truth = oadev(clock, max_af=8).var
+        auto_err.append(float(np.median(cross.auto_a / truth - 1.0)))
+        cross_err.append(cross.var / truth - 1.0)
+        # The error bar has to cover the miss, not merely be small.
+        worst_sigma = max(worst_sigma,
+                          float(np.max(np.abs(cross.var - truth) / cross.sem)))
+        rejection.append(float(np.min(cross.rejection_db)))
+
+    # Scored on the bias and on the coverage, not on a flat percentage. A
+    # single realization at 15 dB of rejection carries about 30% of its own
+    # standard error, so "within 10%" would be a statement about luck; what
+    # the method promises is that it is *centred* on the truth and that it
+    # says how far off it might be. Both are measurable.
+    err = np.asarray(cross_err)
+    bias = float(err.mean())
+    bias_se = float(err.std(ddof=1) / np.sqrt(err.size))
+    median_auto = float(np.median(auto_err))
+    ok = abs(bias) < 4.0 * bias_se and worst_sigma < 4.0
+    return Check(
+        "coverage", "cross-variance recovers a clock the auto-variance cannot",
+        "One synthetic white-FM clock seen through two channels with "
+        "independent white-PM noise, at a level that puts the clock about a "
+        "factor of three under the single-channel floor in deviation. The "
+        "truth is the generated clock record's own oadev, not a fit, so this "
+        "measures the rejection rather than its self-consistency. Scored "
+        "over tau = 1..8 s, where the instrument dominates and the rejection "
+        "is actually being tested; by long tau the clock has emerged anyway "
+        "and both estimates are right.",
+        "unbiased to within four standard errors of the ensemble mean, and "
+        "every single-realization miss inside four of its own reported "
+        "standard errors. Not a flat percentage: at this rejection one "
+        "realization carries tens of percent of sampling scatter, so a tight "
+        "band would score luck. The auto-variance is reported beside it as "
+        "the size of the problem it is solving.",
+        f"bias {bias:+.1%} against {bias_se:.1%} standard error over {runs} "
+        f"realizations, worst miss {worst_sigma:.1f} sigma, auto median "
+        f"{median_auto:+.0%} high, rejection {np.min(rejection):.1f} dB or "
+        "better",
+        ok,
+    )
 
 
 def _bench_hat_round_trip() -> Check:
