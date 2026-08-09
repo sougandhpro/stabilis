@@ -90,14 +90,70 @@ adjacent to its start.
 
     L_j = (2^j - 1)(L - 1) + 1        coefficients dropped at level j
 
+## Confidence intervals, and gaps
+
+The retained coefficients are carried on the result, so `confidence` serves
+the wavelet variance through the same single path it serves every other
+estimator with. That is not an approximation borrowed from the Allan
+family: `eta1` is an EDOF read off the autocorrelation of the terms being
+averaged, and at scale `j` those terms *are* these coefficients. With the
+Haar filter the whole interval — EDOF and both bounds — comes back equal to
+the overlapping Allan interval to 1e-12, the same identity showing up in
+the error bar.
+
+`span_factor` is `2(L-1)`, the equivalent filter's width per unit of `m`,
+since `L_j / m -> 2(L - 1)`. Haar gives 2, which is the Allan family's own
+value.
+
+One thing here was checked rather than reasoned. `eta1` truncates its lag
+sum at `4m`, a width calibrated against the Allan window; the equivalent
+filter at level `j` is `2(L-1)m` wide, so the concern was that the flat
+truncation discards real correlation and returns bounds too narrow.
+
+Median `eta1` over 400 realizations of N = 4096 white FM, against a
+Monte-Carlo `2 sigma^4 / Var(sigma_hat^2)` from the same 400, as a ratio to
+that truth. Scales to `m = N/32`, past which the truth is itself uncertain:
+
+| filter | `kmax = 4m`, as shipped | `kmax = 4(L-1)m`, the filter's own width |
+|---|---|---|
+| haar | 0.86 – 1.15 | identical, `L - 1 = 1` |
+| d4 | 0.84 – 1.13 | 0.67 – 1.12 |
+| d6 | 0.83 – 1.15 | 0.65 – 1.09 |
+| d8 | 0.86 – 1.15 | 0.68 – 1.07 |
+
+Widening the sum to the filter's own width is **worse**, and the two
+columns are not symmetric about 1: the wide one drifts steadily low towards
+the coarse scales (d8 runs 0.95, 1.07, 1.04, 0.93, 0.84, 0.76, 0.83, 0.68),
+which is bounds too *wide* rather than too narrow, but wrong in a way that
+grows with tau. The extra lags carry more `rho_hat` noise than signal —
+exactly the bias `eta1`'s truncation exists to remove. The flat `4m` stays,
+and does about as well on the longer filters as on Haar.
+
+**Gaps are masked, and only masked.** A gap is a non-finite sample; the
+filter spreads it over every coefficient whose support covers it and those
+are dropped, which is `gap_policy='mask'` arriving by another route. The
+count reaches provenance. `'segment'` is refused rather than accepted and
+ignored, because each run would land on its own dyadic grid and pooling
+across grids that do not line up is not a decision the estimator can make
+for the caller.
+
+The price is steep at the coarse end and worth stating plainly: one bad
+sample in 2048 removes the coarsest `d4` scale outright, because the
+equivalent filter there is 1534 taps and every coefficient the boundary
+left covers the gap. That is the argument for the gap-filling milestone,
+not an argument for improvising an interpolation here.
+
 ## Validation status
 
 **Validated.** `tests/test_wavelet.py`: the filter algebra for every family;
 the Allan identity to 1e-14 over eleven octaves, from both phase and
 frequency input; shift equivariance of the coefficients as bit equality;
 shift invariance of the biased variance to 1e-14; the deliberate
-*non*-invariance of the unbiased one; and the drift annihilation table
-above.
+*non*-invariance of the unbiased one; the drift annihilation table above;
+the EDOF against Monte-Carlo truth for `d4` and `d8`; the Haar confidence
+interval against the overlapping Allan one; and the gap accounting.
+`tests/test_docs_and_cli.py` runs the same identity through the CLI, since
+that is where a user meets it.
 
 ## Not yet
 
@@ -106,9 +162,11 @@ above.
   criterion rather than the minimum-phase one. D8 is here and covers the
   same `K = 4`; LA8 would buy a more symmetric impulse response, not more
   vanishing moments.
-* **The wavelet EDOF path.** `confidence` currently treats a wavelet result
-  through the coefficient-based estimators; Percival & Walden's own
-  spectral EDOF is a separate piece.
+* **Percival & Walden's spectral EDOF.** The coefficient-based path above
+  is measured and honest, but their mode-2 and mode-3 estimators derive the
+  degrees of freedom from an assumed or fitted spectrum instead, and are
+  the better answer where the record is short and `eta1` has too few terms
+  to read an autocorrelation from.
 * **Mondal & Percival's gap-tolerant estimator**, the imputation-free route
   to a wavelet variance on gappy records.
 

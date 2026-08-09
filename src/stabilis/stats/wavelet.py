@@ -48,7 +48,7 @@ import numpy as np
 from ..log import record
 from ..registry import register
 from ..types import FreqSeries, PhaseSeries
-from .core import StabilityResult
+from .core import MAX_COEFF_BYTES, StabilityResult
 
 __all__ = ["FILTERS", "daubechies", "wavelet_filters", "modwt",
            "wavelet_variance", "wdev"]
@@ -56,6 +56,14 @@ __all__ = ["FILTERS", "daubechies", "wavelet_filters", "modwt",
 # Filter families by name, keyed to the number of vanishing moments K.
 # The length is 2K, so Haar is the two-tap K=1 case.
 FILTERS = {"haar": 1, "d4": 2, "d6": 3, "d8": 4}
+
+# Width of one coefficient's support, as a multiple of the averaging factor
+# -- the `span_factor` the conservative EDOF counts non-overlapping terms
+# with. The equivalent filter at level j is L_j = (2^j - 1)(L - 1) + 1 taps
+# long and m = 2^{j-1}, so L_j/m -> 2(L - 1). Haar gives 2, which is the
+# Allan family's own value: the same identity as `avar = 2 nu^2`, showing
+# up in the error bar.
+_SPAN = {name: 2 * (2 * k - 1) for name, k in FILTERS.items()}
 
 
 def daubechies(k: int) -> np.ndarray:
@@ -162,7 +170,8 @@ def _boundary(n: int, filter_length: int, level: int) -> int:
 
 
 def wavelet_variance(series, name: str = "haar", levels: int | None = None,
-                     unbiased: bool = True) -> StabilityResult:
+                     unbiased: bool = True, keep_coeffs: bool = True,
+                     gap_policy: str = "auto") -> StabilityResult:
     """Wavelet variance by scale, from a `FreqSeries` or `PhaseSeries`.
 
     The scale is `tau_j = 2^{j-1} tau0`, and for fractional frequency with
@@ -173,7 +182,28 @@ def wavelet_variance(series, name: str = "haar", levels: int | None = None,
     `unbiased=True` drops the coefficients affected by the circular
     boundary. It is the default because the alternative silently treats the
     end of the record as adjacent to its beginning.
+
+    The retained coefficients are carried on the result, so `confidence`
+    works here through the same single path it serves every other estimator
+    with: `eta1` is an EDOF from the autocorrelation of the terms being
+    averaged, and at scale `j` those terms are exactly these coefficients.
+    `keep_coeffs=False` drops them, and the interval with them.
+
+    **Gaps are masked, and only masked.** A gap is a non-finite sample; the
+    filter spreads it across every coefficient whose support touches it, and
+    those coefficients are dropped. That is `gap_policy='mask'` arriving by
+    a different route, and it is why `'segment'` is refused rather than
+    accepted and ignored: analysing each run separately would give each its
+    own dyadic grid, and pooling variances across grids that do not line up
+    is a decision this function has no basis to make for the caller.
     """
+    if gap_policy not in ("auto", "mask"):
+        raise ValueError(
+            f"wavelet_variance: gap_policy={gap_policy!r} is not available "
+            "here. The MODWT masks gaps -- it drops the coefficients a gap "
+            "touched -- and cannot segment, because each run would land on "
+            "its own dyadic grid. Use gap_policy='mask', or split the record "
+            "yourself and analyse the runs you want.")
     if isinstance(series, PhaseSeries):
         from ..types import to_frequency
         fs = to_frequency(series)
@@ -185,18 +215,34 @@ def wavelet_variance(series, name: str = "haar", levels: int | None = None,
     y = np.asarray(fs.y, dtype=np.float64)
     coeffs = modwt(y, name, levels)
     filter_length = 2 * FILTERS[name]
+    if keep_coeffs:
+        want = len(coeffs) * y.size * 8
+        if want > MAX_COEFF_BYTES:
+            raise MemoryError(
+                f"wvar[{name}]: {len(coeffs)} levels over {y.size} points "
+                f"would retain about {want / 1e9:.1f} GB of coefficients, "
+                f"past the {MAX_COEFF_BYTES / 1e9:.1f} GB limit. They are "
+                "kept only for the confidence interval, so pass "
+                "keep_coeffs=False if you do not need bounds, or `levels=` "
+                "to stop short of the coarsest scales."
+            )
 
-    variances, counts, scales, kept = [], [], [], []
+    variances, counts, scales, kept, retained = [], [], [], [], []
+    masked = 0
     for j, w in enumerate(coeffs, start=1):
         start = _boundary(y.size, filter_length, j) - 1 if unbiased else 0
         usable = w[start:]
+        after_boundary = usable.size
         usable = usable[np.isfinite(usable)]
+        masked += after_boundary - usable.size
         if usable.size < 2:
             continue
         variances.append(float(np.mean(usable ** 2)))
         counts.append(int(usable.size))
         scales.append((1 << (j - 1)) / fs.rate_hz)
         kept.append(1 << (j - 1))
+        if keep_coeffs:
+            retained.append(usable)
 
     if not kept:
         raise ValueError(
@@ -205,22 +251,27 @@ def wavelet_variance(series, name: str = "haar", levels: int | None = None,
 
     prov = record(fs.provenance, "stats.wavelet", "wavelet_variance",
                   {"filter": name, "vanishing_moments": FILTERS[name],
-                   "unbiased": unbiased, "levels": len(kept)},
-                  f"{len(kept)} scales, tau {scales[0]:g}..{scales[-1]:g} s")
+                   "unbiased": unbiased, "levels": len(kept),
+                   "gap_policy": "mask", "n_gaps": int(fs.n_gaps),
+                   "coefficients_masked": int(masked)},
+                  f"{len(kept)} scales, tau {scales[0]:g}..{scales[-1]:g} s"
+                  + (f", {masked} coefficients masked by "
+                     f"{fs.n_gaps} gaps" if masked else ""))
     return StabilityResult(
         kind=f"wvar[{name}]",
         af=np.asarray(kept, dtype=np.int64),
         tau_s=np.asarray(scales, dtype=np.float64),
         var=np.asarray(variances, dtype=np.float64),
         n_terms=np.asarray(counts, dtype=np.int64),
-        rate_hz=fs.rate_hz, provenance=prov, span_factor=1,
+        rate_hz=fs.rate_hz, provenance=prov,
+        span_factor=_SPAN[name], coeffs=tuple(retained),
     )
 
 
 @register("estimator", "wdev")
 def wdev(series, name: str = "haar", levels: int | None = None,
-         unbiased: bool = True, taus=None, max_af=None,
-         gap_policy: str = "auto") -> StabilityResult:
+         unbiased: bool = True, keep_coeffs: bool = True, taus=None,
+         max_af=None, gap_policy: str = "auto") -> StabilityResult:
     """Wavelet deviation on the **Allan scale**: `sqrt(2 * nu^2)`.
 
     Scaled so that `wdev(..., "haar")` and `oadev` are the same number at
@@ -228,9 +279,17 @@ def wdev(series, name: str = "haar", levels: int | None = None,
     case rather than a separate thing that happens to look similar.
 
     `taus` and `max_af` are accepted and ignored: the MODWT's scales are
-    dyadic by construction, one per level.
+    dyadic by construction, one per level. They are in the signature so that
+    the estimator registry can call every member the same way; the CLI does
+    not offer the flags, because offering one and ignoring it is worse than
+    not having it.
     """
     result = wavelet_variance(series, name=name, levels=levels,
-                              unbiased=unbiased)
+                              unbiased=unbiased, keep_coeffs=keep_coeffs,
+                              gap_policy=gap_policy)
     from dataclasses import replace
+    # The coefficients are left on their own scale. `eta1` works from their
+    # autocorrelation, which the factor of 2 cancels out of, and rescaling
+    # arrays the caller may inspect to match a deviation they did not ask
+    # for would be the more surprising choice.
     return replace(result, var=result.var * 2.0, kind=f"wdev[{name}]")

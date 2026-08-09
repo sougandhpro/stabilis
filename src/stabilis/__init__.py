@@ -62,6 +62,7 @@ from .stats import (  # noqa: E402
     tierms,
     totdev,
     theo1,
+    wdev,
 )
 from .synth import power_law_freq, power_law_phase  # noqa: E402
 
@@ -89,6 +90,7 @@ __all__ = [
     "tierms",
     "totdev",
     "theo1",
+    "wdev",
     "StabilityResult",
     # uncertainty
     "confidence",

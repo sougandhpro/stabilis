@@ -10,7 +10,8 @@ should not.
 import numpy as np
 import pytest
 
-from stabilis.stats import oadev
+from stabilis.stats import confidence, oadev
+from stabilis.stats.edof import eta1
 from stabilis.stats.wavelet import (
     FILTERS,
     daubechies,
@@ -165,6 +166,133 @@ def test_scales_are_dyadic_and_carry_the_sample_rate():
     assert w.af.tolist() == [1 << j for j in range(w.af.size)]
     assert w.tau_s[0] == pytest.approx(0.25), "tau0 = 1/rate"
     assert w.tau_s[1] == pytest.approx(0.5)
+
+
+def test_the_haar_confidence_interval_is_the_allan_confidence_interval():
+    """The identity carried all the way through to the error bar.
+
+    `eta1` is an EDOF from the autocorrelation of the terms being averaged.
+    At scale `2^{j-1}` the retained Haar coefficients *are* the overlapping
+    Allan second differences, and `span_factor` is 2 for both, so nothing
+    about the interval can differ -- not the EDOF, not either bound.
+
+    Agreement is to rounding rather than bit-for-bit, and the difference is
+    informative: the MODWT reaches those differences through `j` cascaded
+    convolutions and `oadev` forms them directly, so the two sum the same
+    terms in different orders. `1e-12` is loose enough for that and far too
+    tight to survive a wavelet EDOF path drifting away from the Allan one.
+    """
+    fs = power_law_freq(4096, 0, rate_hz=1.0, rng=np.random.default_rng(1),
+                        h_alpha=1e-22)
+    allan = confidence(oadev(fs, taus="octave"))
+    wave_result = wdev(fs, "haar")
+    wave = confidence(wave_result)
+    allan_result = oadev(fs, taus="octave")
+    compared = 0
+    for i, tau in enumerate(wave_result.tau_s):
+        j = int(np.argmin(np.abs(allan_result.tau_s - tau)))
+        if abs(allan_result.tau_s[j] - tau) > 1e-9:
+            continue
+        assert wave.edof[i] == pytest.approx(allan.edof[j], rel=1e-12)
+        assert wave.var_lo[i] == pytest.approx(allan.var_lo[j], rel=1e-14)
+        assert wave.var_hi[i] == pytest.approx(allan.var_hi[j], rel=1e-14)
+        compared += 1
+    assert compared >= 10
+
+
+@pytest.mark.parametrize("name", ["d4", "d8"])
+def test_the_wavelet_edof_tracks_monte_carlo_truth(name):
+    """The longer filters have no Allan identity to lean on, so measure.
+
+    `eta1` truncates its lag sum at `4m`, a width calibrated for the Allan
+    family. The equivalent filter at level `j` is wider than that -- 2(L-1)m
+    rather than 2m -- so the concern was that the flat truncation discards
+    real correlation and returns error bars too narrow.
+
+    It does not. Measured over 400 realizations of N=4096 (theory/wavelet.md
+    carries the table), the flat `4m` holds 0.84-1.15 of Monte-Carlo truth
+    for every family, while widening the sum to the filter's own width sinks
+    to 0.65-0.68 at the coarse end -- drifting low, which is bounds too wide
+    rather than too narrow, but wrong by more and increasingly so with tau.
+    The extra lags carry more `rho_hat` noise than signal. The flat
+    truncation is kept, and this is what pins it.
+
+    Scales past `n/32` are excluded for the same reason `test_edof.py`
+    excludes them: a handful of degrees of freedom, where the Monte-Carlo
+    truth is itself uncertain. At `d4`, `m = 64` the ratio is 1.40 against a
+    truth of 7.5 DOF estimated from 120 trials, which is not a measurement
+    of `eta1`.
+    """
+    trials, n = 120, 1024
+    runs = [wavelet_variance(
+        power_law_freq(n, 0, rate_hz=1.0, rng=np.random.default_rng(500 + t)),
+        name) for t in range(trials)]
+    var = np.array([r.var for r in runs])
+    for i, af in enumerate(runs[0].af):
+        if int(af) > n // 32:
+            continue
+        truth = 2.0 * var[:, i].mean() ** 2 / var[:, i].var(ddof=1)
+        got = float(np.median([eta1(r.coeffs[i], int(af)) for r in runs]))
+        assert 0.75 < got / truth < 1.35, f"{name} m={af}: {got / truth:.2f}"
+
+
+def test_dropping_the_coefficients_drops_the_interval_and_says_so():
+    """The bounds are the only thing they are kept for."""
+    fs = power_law_freq(512, 0, rate_hz=1.0, rng=np.random.default_rng(4))
+    lean = wdev(fs, "haar", keep_coeffs=False)
+    assert lean.coeffs == ()
+    assert np.allclose(lean.var, wdev(fs, "haar").var, rtol=0, atol=0)
+    with pytest.raises(ValueError, match="coefficient arrays"):
+        confidence(lean)
+
+
+def test_the_span_factor_is_the_equivalent_filter_width():
+    """2 for Haar -- the Allan family's own value -- and 2(L-1) after."""
+    fs = power_law_freq(512, 0, rate_hz=1.0, rng=np.random.default_rng(5))
+    assert wavelet_variance(fs, "haar").span_factor == 2
+    assert wavelet_variance(fs, "d4").span_factor == 6
+    assert wavelet_variance(fs, "d8").span_factor == 14
+
+
+def test_a_gap_masks_the_coefficients_it_touched_and_says_how_many():
+    """Masking is the only gap policy the MODWT has, so it is explicit.
+
+    One non-finite sample contaminates every coefficient whose support
+    covers it -- more of them at each coarser scale, since the equivalent
+    filter grows. Those are dropped, the count reaches provenance, and the
+    surviving term counts fall. What must *not* happen is the gap being
+    interpolated away, or its cost going unrecorded.
+
+    At the coarsest scale the cost is total: the `d4` equivalent filter is
+    1534 taps there, wider than the 515 coefficients the boundary left, so
+    every one of them covers the gap and the scale disappears from the
+    result rather than being reported from a handful of survivors. One bad
+    sample in 2048 costs an octave of range, which is the honest price and
+    the argument for the gap-filling milestone.
+    """
+    fs = power_law_freq(2048, 0, rate_hz=1.0, rng=np.random.default_rng(9))
+    y = fs.y.copy()
+    y[1000] = np.nan
+    gapped = wavelet_variance(FreqSeries(y, rate_hz=1.0), "d4")
+    clean = wavelet_variance(fs, "d4")
+
+    step = next(s for s in gapped.provenance.steps
+                if s.action == "wavelet_variance")
+    assert step.params["gap_policy"] == "mask"
+    assert step.params["n_gaps"] == 1
+    assert step.params["coefficients_masked"] > 0
+    assert gapped.af.size == clean.af.size - 1, "the coarsest scale is gone"
+    lost = clean.n_terms[:gapped.af.size] - gapped.n_terms
+    assert all(lost > 0), "every surviving scale loses terms to the gap"
+    assert lost[-1] > lost[0], "coarser scales lose more, the filter is wider"
+
+
+def test_segmenting_a_gapped_record_is_refused_rather_than_ignored():
+    """Each run would land on its own dyadic grid, and pooling across grids
+    that do not line up is not this function's decision to make."""
+    fs = power_law_freq(256, 0, rate_hz=1.0, rng=np.random.default_rng(10))
+    with pytest.raises(ValueError, match="cannot segment"):
+        wavelet_variance(fs, "haar", gap_policy="segment")
 
 
 def test_a_record_too_short_for_the_filter_is_refused():

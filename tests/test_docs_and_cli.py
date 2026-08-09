@@ -252,3 +252,53 @@ def test_cli_compare_edof_json_carries_every_method(tmp_path, capsys):
     assert payload["alpha"] == [0] * len(payload["af"])
     assert len(payload["dev_lo"]["greenhall"]) == len(payload["af"])
     assert payload["provenance"]["steps"]
+
+
+def test_cli_wdev_agrees_with_oadev_on_the_command_line(tmp_path, capsys):
+    """The library's central identity, asserted where a user would meet it.
+
+    `wdev --filter haar` and `oadev` are the same estimator reached two
+    ways, so the two tables must carry the same numbers at every shared tau
+    -- bounds included. A regression that broke the identity but left both
+    curves plausible would show up here and nowhere in the eye.
+    """
+    p = _noise_file(tmp_path, n=2048)
+    base = ["--kind", "frequency", "--rate", "1", "--json"]
+    assert main(["wdev", str(p), "--filter", "haar"] + base) == 0
+    wave = json.loads(capsys.readouterr().out)
+    assert main(["oadev", str(p)] + base) == 0
+    allan = json.loads(capsys.readouterr().out)
+
+    shared = {t: i for i, t in enumerate(allan["tau_s"])}
+    compared = 0
+    for i, tau in enumerate(wave["tau_s"]):
+        if tau not in shared:
+            continue
+        j = shared[tau]
+        assert wave["dev"][i] == pytest.approx(allan["dev"][j], rel=1e-12)
+        assert (wave["confidence"]["dev_lo"][i]
+                == pytest.approx(allan["confidence"]["dev_lo"][j], rel=1e-12))
+        compared += 1
+    assert compared >= 9
+
+
+def test_cli_wdev_offers_no_tau_grid_it_would_ignore(tmp_path, capsys):
+    """The MODWT's scales are dyadic by construction.
+
+    `--taus` and `--max-af` have nothing to act on here, so the parser does
+    not accept them. Offering a flag and then ignoring it is the failure
+    mode this avoids -- the same reason `mtie` is offered no `--confidence`.
+    """
+    p = _noise_file(tmp_path, n=512)
+    with pytest.raises(SystemExit):
+        main(["wdev", str(p), "--kind", "frequency", "--rate", "1",
+              "--taus", "all"])
+
+
+def test_cli_wdev_names_the_filter_and_its_vanishing_moments(tmp_path, capsys):
+    p = _noise_file(tmp_path, n=1024)
+    assert main(["wdev", str(p), "--kind", "frequency", "--rate", "1",
+                 "--filter", "d6"]) == 0
+    out = capsys.readouterr().out
+    assert "filter: d6, K = 3 vanishing moments" in out
+    assert "Min WDEV[D6]" in out and "EDOF" in out

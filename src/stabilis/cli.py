@@ -144,6 +144,45 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--json", action="store_true", help="emit JSON")
         p.set_defaults(func=_cmd_estimate, estimator=fn, estimator_name=name)
 
+    # wdev gets its own parser rather than a place in the loop above: its
+    # scales are dyadic by construction, so --taus and --max-af have nothing
+    # to act on, and the MODWT masks gaps rather than choosing a policy.
+    from .stats.wavelet import FILTERS, wdev
+
+    p_w = sub.add_parser(
+        "wdev", help=wdev.__doc__.splitlines()[0])
+    _add_input_args(p_w)
+    p_w.add_argument(
+        "--filter", default="haar", choices=sorted(FILTERS),
+        help="wavelet family. haar (K=1) reproduces the overlapping ADEV "
+             "exactly; d4 (K=2) additionally annihilates a linear frequency "
+             "drift, d6 a quadratic, d8 a cubic",
+    )
+    p_w.add_argument(
+        "--levels", type=int,
+        help="stop after this many octaves (default: as many as the record "
+             "supports)",
+    )
+    p_w.add_argument(
+        "--biased", action="store_true",
+        help="keep the coefficients that wrapped the circular boundary. "
+             "Shift-invariant and wrong: it treats the end of the record as "
+             "adjacent to its start",
+    )
+    p_w.add_argument(
+        "--confidence", type=float, default=ONE_SIGMA,
+        help="confidence level for the sigma bounds (default: 1 sigma)",
+    )
+    p_w.add_argument(
+        "--edof-method", default="auto", choices=EDOF_METHODS,
+        help="degrees-of-freedom estimator; see `stabilis docs edof`",
+    )
+    p_w.add_argument(
+        "--no-confidence", action="store_true", help="skip the bounds")
+    p_w.add_argument("--json", action="store_true", help="emit JSON")
+    p_w.set_defaults(func=_cmd_wdev, estimator_name="wdev",
+                     alpha=None, run_policy="pool")
+
     p_cmp = sub.add_parser(
         "compare-edof",
         help="every EDOF method side by side, and what each does to the bounds",
@@ -426,7 +465,18 @@ def _cmd_estimate(args) -> int:
     want_ci = want_ci and result.is_variance
     policy = _step_params(result, "evaluate")
     ci = _confidence_for(args, result, series) if want_ci else None
+    header = (f"# tau grid: {args.taus}   n = {series.n}   "
+              f"rate = {series.rate_hz:g} Hz")
+    if series.n_gaps:
+        header += (
+            f"\n# {series.n_gaps} gaps, {policy['runs']} gap-free runs, "
+            f"policy '{policy['gap_policy']}', longest run {policy['longest_run']}"
+        )
+    return _print_result(args, result, ci, header)
 
+
+def _print_result(args, result, ci, header: str) -> int:
+    """The tau table, shared by every estimator that prints one."""
     if args.json:
         payload = {
             "kind": result.kind,
@@ -451,12 +501,7 @@ def _cmd_estimate(args) -> int:
         return 0
 
     print(f"# {result.kind.upper()} for {args.path}")
-    print(f"# tau grid: {args.taus}   n = {series.n}   rate = {series.rate_hz:g} Hz")
-    if series.n_gaps:
-        print(
-            f"# {series.n_gaps} gaps, {policy['runs']} gap-free runs, "
-            f"policy '{policy['gap_policy']}', longest run {policy['longest_run']}"
-        )
+    print(header)
     name = result.kind.upper()
     if ci is None:
         print(f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}  {name:>14}")
@@ -489,6 +534,29 @@ def _cmd_estimate(args) -> int:
     for why in reasons:
         print(f"# declined greenhall where: {why}")
     return 0
+
+
+def _cmd_wdev(args) -> int:
+    """The wavelet deviation, on the Allan scale and one row per octave.
+
+    Same table as every other estimator, because with the Haar filter it is
+    the same number: `wdev --filter haar` and `oadev` agree at every shared
+    tau, bounds included. The `--filter` column is where they part company.
+    """
+    from .stats.wavelet import FILTERS, wdev
+
+    series = _load(args)
+    want_ci = not args.no_confidence
+    result = wdev(series, name=args.filter, levels=args.levels,
+                  unbiased=not args.biased, keep_coeffs=want_ci)
+    ci = _confidence_for(args, result, series) if want_ci else None
+    step = _step_params(result, "wavelet_variance")
+    header = (f"# filter: {args.filter}, K = {FILTERS[args.filter]} vanishing "
+              f"moments   n = {series.n}   rate = {series.rate_hz:g} Hz")
+    if series.n_gaps:
+        header += (f"\n# {series.n_gaps} gaps masked "
+                   f"{step['coefficients_masked']} coefficients")
+    return _print_result(args, result, ci, header)
 
 
 def _cmd_compare_edof(args) -> int:
