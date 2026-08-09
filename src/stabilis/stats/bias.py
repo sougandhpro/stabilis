@@ -40,6 +40,8 @@ import numpy as np
 
 __all__ = [
     "THEO1_BIAS_MEASURED",
+    "THEO1_BIAS_PARAMS",
+    "theo1_bias",
     "totvar_bias",
     "TOTVAR_BIAS_A","deviation_bias_factor", "unbias_deviation"]
 
@@ -134,6 +136,43 @@ def totvar_bias(alpha: int, tau_s, record_s: float) -> np.ndarray:
             "the long-tau points instead."
         )
     return 1.0 / denominator
+
+
+# SP 1065 Table 2, eq. (31): Thêo1's bias as AVAR/Thêo1 = a + b/m^c, per
+# noise type. Published, unlike THEO1_BIAS_MEASURED below -- which is why
+# both are here. White FM is the (1, 0, 0) row, the identity that
+# identified the missing 0.75 in eq. (30).
+THEO1_BIAS_PARAMS = {
+    2: (0.09, 0.74, 0.40),
+    1: (0.14, 0.82, 0.30),
+    0: (1.00, 0.00, 0.00),
+    -1: (1.87, -1.05, 0.79),
+    -2: (2.70, -1.53, 0.85),
+}
+
+
+def theo1_bias(alpha: int, m):
+    """`AVAR/Thêo1` for a known noise type, SP 1065 eq. (31).
+
+        bias = a + b / m^c
+
+    Multiply a Thêo1 variance by this to get an estimate of AVAR. It needs
+    the noise type, which is the whole reason ThêoBR exists -- `theobr`
+    measures the same ratio off the data instead, and needs no `alpha`.
+
+    The asymptotes are a useful check on the measured table below: `a` is
+    the large-m limit, 1.87 for flicker FM and 2.70 for random-walk FM,
+    against measured Thêo1/AVAR of 0.55 and 0.37 -- 1/1.82 and 1/2.70.
+    """
+    if alpha not in THEO1_BIAS_PARAMS:
+        raise ValueError(
+            f"theo1_bias: SP 1065 Table 2 covers alpha in "
+            f"{sorted(THEO1_BIAS_PARAMS)}, not {alpha}")
+    a, b, c = THEO1_BIAS_PARAMS[alpha]
+    m = np.asarray(m, dtype=np.float64)
+    if np.any(m < 1):
+        raise ValueError("theo1_bias: averaging factor must be at least 1")
+    return a + b / m**c
 
 
 # Thêo1's bias against AVAR, at the same tau, for m >~ 100.

@@ -31,6 +31,16 @@ __all__ = ["main", "build_parser"]
 
 _LOG_LEVELS = ("debug", "info", "warning", "error")
 
+# Estimators with no confidence interval today, for two different reasons,
+# and offering the flags anyway would be worse than not having them. MTIE
+# and TIE rms are not variances at all, so the chi-square interval does not
+# apply and `confidence` refuses them. The Thêo family *is* a variance
+# family, but it reports no coefficient arrays for the data-driven path and
+# its own EDF (SP 1065 Table 9) is not implemented -- see theory/theoh.md.
+# None of them takes `keep_coeffs` either, which is why this one list drives
+# both decisions.
+NO_INTERVAL = ("mtie", "tierms", "theo1", "theobr", "theoh")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -74,13 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats.add_argument("--json", action="store_true", help="emit JSON")
     p_stats.set_defaults(func=_cmd_stats)
 
-    from .stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, tierms,
-                    totdev)
+    from .stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, theobr,
+                    theoh, tierms, totdev)
 
-    # MTIE and TIE rms take no confidence arguments: they are not variances,
-    # so the chi-square interval does not apply and `confidence` refuses
-    # them. Offering the flags and then ignoring them would be worse than
-    # not offering them.
     for name, fn in (
         ("adev", adev),
         ("oadev", oadev),
@@ -89,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("ohdev", ohdev),
         ("totdev", totdev),
         ("theo1", theo1),
+        ("theobr", theobr),
+        ("theoh", theoh),
         ("mtie", mtie),
         ("tierms", tierms),
     ):
@@ -102,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
             choices=GAP_POLICIES,
             help="how a gap affects nearby terms; see `stabilis docs gaps`",
         )
-        if name in ("mtie", "tierms"):
+        if name in NO_INTERVAL:
             p.add_argument("--json", action="store_true", help="emit JSON")
             p.set_defaults(func=_cmd_estimate, estimator=fn,
                            estimator_name=name, no_confidence=True,
@@ -453,7 +461,7 @@ def _cmd_estimate(args) -> int:
     """
     series = _load(args)
     want_ci = not args.no_confidence
-    extra = {} if args.estimator_name in ("mtie", "tierms") else {
+    extra = {} if args.estimator_name in NO_INTERVAL else {
         "keep_coeffs": want_ci}
     result = args.estimator(
         series,

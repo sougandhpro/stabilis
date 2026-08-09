@@ -302,3 +302,24 @@ def test_cli_wdev_names_the_filter_and_its_vanishing_moments(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "filter: d6, K = 3 vanishing moments" in out
     assert "Min WDEV[D6]" in out and "EDOF" in out
+
+
+@pytest.mark.parametrize("name", ["theo1", "theobr", "theoh"])
+def test_cli_theo_family_runs_without_interval_flags(tmp_path, capsys, name):
+    """`stabilis theo1` used to crash outright.
+
+    `_cmd_estimate` passed `keep_coeffs` to every estimator that was not
+    MTIE or TIE rms, and Thêo1 does not take it -- an unhandled TypeError on
+    a documented subcommand. The Thêo family reports no coefficient arrays
+    and its own EDF (SP 1065 Table 9) is not implemented, so it belongs in
+    the same no-interval list, which is now one constant driving both the
+    parser and the call.
+    """
+    p = _noise_file(tmp_path, n=600)
+    assert main([name, str(p), "--kind", "phase", "--rate", "1"]) == 0
+    out = capsys.readouterr().out
+    assert name.upper() in out
+    assert "Min" not in out and "EDOF" not in out, "no bounds are claimed"
+    with pytest.raises(SystemExit):
+        main([name, str(p), "--kind", "phase", "--rate", "1", "--confidence",
+              "0.95"])
