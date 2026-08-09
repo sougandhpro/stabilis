@@ -215,9 +215,9 @@ def test_the_page_offers_column_and_unit_controls(server):
     """Asked for directly: pick which column, and say what units it is in."""
     with urllib.request.urlopen(server + "/") as r:
         page = r.read().decode()
-    for element in ('id="columns"', 'id="time_column"', 'id="unit"',
-                    'id="dirpath"', 'id="godir"', 'id="serieslist"',
-                    'id="samerange"'):
+    for element in ('id="time_column"', 'id="unit"', 'id="dirpath"',
+                    'id="godir"', 'id="serieslist"', 'id="samerange"',
+                    'id="addseries"', 'id="avail"', 'data-f="column"'):
         assert element in page, element
     assert '"ns"' in page and '"ps"' in page
 
@@ -243,7 +243,7 @@ def test_the_chosen_column_is_the_one_analysed(three_column, server):
         "path": "three.dat", "data_kind": "phase", "column": "2",
         "time_column": "0", "unit": "s", "taus": "decade"})
     assert status == 200, body
-    assert body["column"] == 2
+    assert body["column"] == "2", "the column field now carries the expression"
     assert body["rate_hz"] == 1.0, "rate inferred from the time column"
 
     # Column 1 is a constant, so its ADEV is zero -- proof the selector
@@ -434,7 +434,7 @@ def test_an_unlabelled_column_gets_a_usable_default(multi, server):
     _Handler.root = multi.resolve()
     _status, body = post(server, "/api/preview",
                          {"path": "three.dat", "columns": [1], "rate": "1.0"})
-    assert body["series"][0]["label"] == "column 1"
+    assert body["series"][0]["label"] == "1", "the expression is the default label"
 
 
 def test_each_column_can_carry_its_own_range(multi, server):

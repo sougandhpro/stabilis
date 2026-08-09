@@ -24,6 +24,7 @@ mouse gesture is not evidence.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import numpy as np
@@ -31,7 +32,8 @@ import numpy as np
 from .log import record, warn
 from .types import FreqSeries, PhaseSeries
 
-__all__ = ["BY", "select_range", "drop_outliers", "summary", "MJD_EPOCH_UNIX"]
+__all__ = ["BY", "select_range", "drop_outliers", "summary",
+           "parse_expression", "combine", "MJD_EPOCH_UNIX"]
 
 # Ways of naming a point in the record.
 BY = ("index", "seconds", "mjd", "unix")
@@ -219,3 +221,70 @@ def summary(series) -> dict:
         "longest_run": int(longest),
         "duration_s": float(values.size / series.rate_hz),
     }
+
+
+# ---------------------------------------------------------------------------
+# Derived columns
+# ---------------------------------------------------------------------------
+
+# One optional sign, then a column named by header or by index. Nothing
+# else: no eval, no arithmetic beyond adding and subtracting whole columns.
+# This library refuses pickle for the same reason -- a file arriving from
+# someone else's rig is untrusted input, and an expression box that reached
+# a Python evaluator would be a far shorter path to running their code.
+_TERM = re.compile(r"\s*([+-]?)\s*([^+-]+?)\s*(?=[+-]|$)")
+
+
+def parse_expression(expression: str, labels) -> tuple[tuple[int, str], ...]:
+    """`"NCS - VSL"` into `((+1, "NCS"), (-1, "VSL"))`.
+
+    Columns may be named by their header or by index, so a file with no
+    header is still usable. Unknown names are refused with the list of what
+    *is* available -- a silent zero column would be a wrong answer that
+    looks plausible.
+    """
+    if not expression or not expression.strip():
+        raise ValueError("empty column expression")
+    known = {str(name).strip(): i for i, name in enumerate(labels)}
+    terms, seen = [], 0
+    for match in _TERM.finditer(expression):
+        sign, name = match.group(1), match.group(2).strip()
+        seen = match.end()
+        if not name:
+            continue
+        if name in known:
+            index = known[name]
+        else:
+            try:
+                index = int(name)
+            except ValueError:
+                raise ValueError(
+                    f"unknown column {name!r} in {expression!r}; "
+                    f"this file has {list(labels)}"
+                ) from None
+            if not 0 <= index < len(labels):
+                raise ValueError(
+                    f"column {index} out of range in {expression!r}; "
+                    f"this file has {len(labels)} columns")
+        terms.append((-1 if sign == "-" else 1, str(labels[index])))
+    if not terms or seen < len(expression.rstrip()):
+        raise ValueError(
+            f"could not read {expression!r} as a sum of columns. Write "
+            "something like 'NCS - VSL', '-VSL' or '2 - 1'.")
+    return tuple(terms)
+
+
+def combine(expression: str, labels, rows) -> np.ndarray:
+    """The column `expression` describes, from a table of columns.
+
+    `rows` is 2-D, one column per label. A NaN anywhere in a term makes the
+    result NaN at that sample, which is what should happen: a difference is
+    unknown wherever either side is. That falls out of the arithmetic, and
+    is stated because relying on it is deliberate rather than incidental.
+    """
+    order = {str(name).strip(): i for i, name in enumerate(labels)}
+    out = None
+    for sign, name in parse_expression(expression, labels):
+        column = np.asarray(rows[:, order[name]], dtype=np.float64)
+        out = sign * column if out is None else out + sign * column
+    return out

@@ -176,7 +176,21 @@ series = edit.select_range(series, 3000, 50000, by='index', reason='after warm-u
 series = edit.drop_outliers(series, threshold=6.0, reason='counter glitch')
 ```
 
-An exclusion that exists only as a mouse gesture is not evidence. It computes nothing itself — it calls the same
+An exclusion that exists only as a mouse gesture is not evidence.
+
+Each series is a **column expression**, not just a column index, so a
+derived channel needs no preprocessing step of its own:
+
+| expression | meaning |
+|---|---|
+| `NCS` | that column as it stands |
+| `NCS - VSL` | one channel against another |
+| `-VSL` | the negated column |
+| `A + B - C` | any sum and difference of columns |
+
+Columns may be named by their file header or by index. Only addition and
+subtraction of whole columns are accepted, and there is no evaluator behind
+the box — the same reason this library refuses pickle. It computes nothing itself — it calls the same
 library functions the CLI does, so the two cannot disagree.
 
 Units matter and are not guessed: the library works in seconds of phase and

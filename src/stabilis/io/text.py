@@ -22,7 +22,8 @@ from ..provenance import file_sha256, new_provenance
 from ..registry import register
 from ..types import FreqSeries, PhaseSeries
 
-__all__ = ["read_text", "load_phase", "load_frequency", "MAX_COLUMNS"]
+__all__ = ["read_text", "read_table", "load_phase", "load_frequency",
+           "MAX_COLUMNS"]
 
 MAX_COLUMNS = 8
 _DELIMITERS = (",", ";", "\t")
@@ -79,6 +80,62 @@ def read_text(
     return values, times, defects
 
 
+def read_table(path: str | Path, delimiter: str | None = None,
+               comment_chars: str = _COMMENT_CHARS, strict: bool = False):
+    """Every column at once, with the header names if the file has any.
+
+    Returns `(labels, rows, defects)`. Reading the whole table in one pass
+    is what lets a caller build a *derived* column -- a difference of two
+    channels, say -- without reading the file once per column.
+
+    The header is looked for on the first line, comment marker and all,
+    because that is where loggers put it: `#time,VSL,NCS,...`. It is only
+    accepted if it has the same field count as the data and does not parse
+    as numbers, so a file whose first row is data is not mistaken for a
+    labelled one.
+    """
+    path = Path(path)
+    rows, defects = _parse_rows(path, comment_chars, delimiter, strict)
+    labels = _header(path, comment_chars, delimiter, rows.shape[1])
+
+    # A column that is *entirely* unreadable is a text column -- a
+    # timestamp, a status word -- not damage. Counting one of those as a
+    # million bad fields would bury the handful that are real, so they are
+    # named separately and discounted from the total.
+    whole = [i for i in range(rows.shape[1])
+             if rows.shape[0] and not np.isfinite(rows[:, i]).any()]
+    if whole:
+        defects = defects._replace(
+            bad_fields=max(0, defects.bad_fields - len(whole) * rows.shape[0]),
+            text_columns=tuple(labels[i] for i in whole))
+    return labels, rows, defects
+
+
+def _header(path: Path, comment_chars: str, delimiter: str | None,
+            width: int) -> list[str]:
+    """Column names from the first line, or positional names if there are none."""
+    with open(path, "r") as fh:
+        first = fh.readline().strip()
+    for ch in comment_chars:
+        first = first.lstrip(ch)
+    if delimiter is None:
+        delimiter = _sniff(first)
+    fields = [f.strip() for f in
+              (first.split(delimiter) if delimiter else first.split())]
+    if len(fields) == width + 1:
+        # A leading timestamp column the numeric reader dropped.
+        fields = fields[1:]
+    if len(fields) != width or not fields:
+        return [f"column {i}" for i in range(width)]
+    for field in fields:
+        try:
+            float(field)
+        except ValueError:
+            continue
+        return [f"column {i}" for i in range(width)]   # numbers, not names
+    return fields
+
+
 # Fields that mean "no value here". Case-insensitive. A missing reading is
 # a gap, and NaN is already this library's gap representation, so these
 # convert rather than raise -- the gap machinery then handles the
@@ -100,6 +157,9 @@ class Defects(NamedTuple):
     padded_to: int
     bad_fields: int
     lines: tuple[int, ...]
+    # Columns that hold no numbers at all -- a timestamp or a status word.
+    # Not damage, and reported apart from it.
+    text_columns: tuple[str, ...] = ()
 
     @property
     def clean(self) -> bool:
@@ -115,7 +175,10 @@ class Defects(NamedTuple):
         if self.bad_fields:
             parts.append(f"{self.bad_fields} unreadable fields became gaps")
         where = ", ".join(str(n) for n in self.lines)
-        return "; ".join(parts) + (f" (first at line {where})" if where else "")
+        text = ("" if not self.text_columns else
+                f"; non-numeric columns {list(self.text_columns)} ignored")
+        return ("; ".join(parts) + (f" (first at line {where})" if where else "")
+                + text)
 
 
 def _parse_rows(path: Path, comment_chars: str, delimiter: str | None,

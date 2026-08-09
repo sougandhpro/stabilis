@@ -104,25 +104,39 @@ def _analyze(root: Path, req: dict) -> dict:
     import matplotlib.pyplot as plt
 
     from . import plot as plotting
-    from .io import load_frequency, load_phase
     from .registry import get
     from .stats import confidence
 
     path = _safe(root, req["path"])
     rate = float(req["rate"]) if req.get("rate") else None
     is_phase = req.get("data_kind", "phase") == "phase"
-    loader = load_phase if is_phase else load_frequency
-    time_column = int(req["time_column"]) if req.get("time_column") else None
 
     name = req.get("estimator", "oadev")
     if name not in ESTIMATORS:
         raise ValueError(f"unknown estimator {name!r}")
     want_ci = bool(req.get("confidence", True))
 
+    from .edit import combine
+    from .types import FreqSeries, PhaseSeries
+
+    labels, rows, _defects = _table(root, req)
+    factor = _unit_factor(req.get("unit"), is_phase)
+
     ax, out_series, notes = None, [], []
-    for col, label, span in _columns_from(req):
-        series = loader(path, rate_hz=rate, column=col, time_column=time_column)
-        series = _rescale(series, req.get("unit"), is_phase)
+    for expr, label, span in _columns_from(req):
+        values = combine(expr, labels, rows) * factor
+        # An expression is a difference of large numbers as often as not,
+        # and these columns routinely carry a constant pedestal -- 0.35 s
+        # in the record this was built against, where float64 spacing is
+        # 5.5e-17 s and the fluctuations live below it. Every estimator
+        # here differences the phase, so removing the offset changes no
+        # answer and buys back the resolution.
+        finite = values[np.isfinite(values)]
+        if finite.size:
+            values = values - finite[0]
+        rate = rate or 1.0
+        series = (PhaseSeries(values, rate_hz=rate) if is_phase
+                  else FreqSeries(values, rate_hz=rate))
         series, prep = _prepare(series, dict(req, start=span[0], stop=span[1]))
 
         kwargs = {"taus": req.get("taus", "octave")}
@@ -141,16 +155,16 @@ def _analyze(root: Path, req: dict) -> dict:
             ci = confidence(result, level=float(req.get("level", 0.6827)))
         ax = plotting.sigma_tau(result, confidence=ci, label=label, ax=ax)
 
-        rows = []
+        table_rows = []
         for i, af in enumerate(result.af.tolist()):
             row = {"af": af, "tau": result.tau_s[i],
                    "n": int(result.n_terms[i]), "dev": result.dev[i]}
             if ci is not None:
                 row["lo"], row["hi"] = ci.dev_lo[i], ci.dev_hi[i]
                 row["edof"], row["via"] = ci.edof[i], ci.method[i]
-            rows.append(row)
+            table_rows.append(row)
         out_series.append({
-            "label": label, "column": col, "rows": rows,
+            "label": label, "column": expr, "rows": table_rows,
             "prep": prep, "n": series.n, "has_ci": ci is not None,
         })
         if series.n_gaps:
@@ -227,25 +241,57 @@ def _decimate(values: np.ndarray, target: int = PREVIEW_POINTS):
 
 
 def _columns_from(req: dict):
-    """The (column, label, range) triples the page asked for.
+    """The (expression, label, range) triples the page asked for.
 
-    One entry means the old single-column behaviour; the request shape is
-    the same either way so nothing special-cases the common case.
+    An entry is a column *expression* rather than an index, so a series can
+    be a difference of channels -- `NCS - VSL` -- as easily as a single
+    one. A bare `0` is still a valid expression, so the simple case is not
+    special-cased anywhere.
     """
-    cols = req.get("columns")
-    if not cols:
-        cols = [int(req.get("column") or 0)]
-    cols = [int(c) for c in cols]
+    exprs = req.get("columns")
+    if not exprs:
+        exprs = [str(req.get("column", 0))]
     labels = list(req.get("labels") or [])
     ranges = list(req.get("ranges") or [])
     out = []
-    for i, col in enumerate(cols):
-        label = (labels[i] if i < len(labels) and labels[i] else f"column {col}")
+    for i, expr in enumerate(exprs):
+        expr = str(expr).strip()
+        label = labels[i] if i < len(labels) and labels[i] else expr
         span = ranges[i] if i < len(ranges) else None
         if span is None:
             span = [req.get("start"), req.get("stop")]
-        out.append((col, str(label), span))
+        out.append((expr, str(label), span))
     return out
+
+
+def _unit_factor(unit, is_phase: bool) -> float:
+    """The multiplier into the library's units, refusing anything unknown.
+
+    The library works in seconds of phase and dimensionless fractional
+    frequency. A file in nanoseconds analysed as seconds is wrong by a
+    billion and looks entirely plausible on a log axis, so an unrecognised
+    unit is an error rather than a silent 1.0.
+    """
+    table = PHASE_UNITS if is_phase else FREQ_UNITS
+    if unit in (None, ""):
+        return 1.0
+    if unit not in table:
+        raise ValueError(
+            f"unknown unit {unit!r} for {'phase' if is_phase else 'frequency'} "
+            f"data; expected one of {sorted(table)}")
+    return table[unit]
+
+
+def _table(root: Path, req: dict):
+    """`(labels, rows, defects)` for the requested file, read once.
+
+    Read whole rather than per column, because a derived series needs
+    several columns and re-reading a 200 MB export once per term would
+    dominate everything else.
+    """
+    from .io.text import read_table
+
+    return read_table(_safe(root, req["path"]))
 
 
 def _preview(root: Path, req: dict) -> dict:
@@ -265,32 +311,32 @@ def _preview(root: Path, req: dict) -> dict:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from .io.text import read_text
+    from .edit import combine
     from .tau import suggest
 
     path = _safe(root, req["path"])
     wanted = _columns_from(req)
-    time_column = int(req["time_column"]) if req.get("time_column") else None
     is_phase = req.get("data_kind", "phase") == "phase"
-    factor = (PHASE_UNITS if is_phase else FREQ_UNITS).get(req.get("unit"), 1.0)
+    factor = _unit_factor(req.get("unit"), is_phase)
+    labels, rows, defects = _table(root, req)
 
     rate = float(req["rate"]) if req.get("rate") else None
-    jitter, defects, n = None, None, 0
-    series_info, columns = [], []
-    for col, label, span in wanted:
-        values, times, defects = read_text(path, column=col,
-                                           time_column=time_column)
-        values = values * factor
-        n = int(values.size)
-        if times is not None and rate is None:
-            from .io.timebase import infer_rate, parse_times
-            try:
-                seconds, _epoch, _fmt = parse_times(times, req.get("time_format"))
-                rate, jitter = infer_rate(seconds)
-            except Exception:
-                pass
-        columns.append((label, values, span))
+    jitter, n = None, int(rows.shape[0])
+    time_column = req.get("time_column")
+    if time_column not in (None, "") and rate is None:
+        from .io.timebase import infer_rate, parse_times
+        try:
+            raw = np.loadtxt(path, delimiter=",", skiprows=1,
+                             usecols=int(time_column), dtype="U40")
+            seconds, _epoch, _fmt = parse_times(raw, req.get("time_format"))
+            rate, jitter = infer_rate(seconds)
+        except Exception:
+            pass
     rate = rate or 1.0
+
+    columns = [(label, combine(expr, labels, rows) * factor, span)
+               for expr, label, span in wanted]
+    series_info = []
 
     height = max(2.4, 1.5 * len(columns) + 0.9)
     fig, axes = plt.subplots(len(columns), 1, figsize=(9.0, height),
@@ -327,7 +373,8 @@ def _preview(root: Path, req: dict) -> dict:
         # know that the shape grew a list.
         "shown": first["shown"],
         "n_gaps": first["n_gaps"],
-        "defects": None if defects is None or defects.clean else defects.describe(),
+        "defects": None if defects.clean else defects.describe(),
+        "labels": list(labels),
         "suggest": suggest(n, float(rate)),
     }
 
@@ -572,6 +619,10 @@ pre.calls { background: rgba(128,128,128,.14); padding: 8px 10px;
 #serieslist tr.active { outline: 1px solid #f90; background: rgba(255,150,0,.10); }
 #serieslist .num { width: 62px; }
 .aim { font-size: 11px; opacity: .7; }
+.colchip { color: #6aa9ff; text-decoration: none; margin-right: 7px;
+           white-space: nowrap; }
+.colchip:hover { text-decoration: underline; }
+button.drop { padding: 2px 7px; font-size: 11px; }
 table { border-collapse: collapse; font-size: 12px; margin-top: 14px; }
 th, td { padding: 3px 10px 3px 0; text-align: right; white-space: nowrap; }
 th { border-bottom: 1px solid rgba(128,128,128,.5); text-align: right; }
@@ -598,10 +649,11 @@ td.via { text-align: left; opacity: .7; }
     <div><label>units in file</label><select id="unit"></select></div>
   </div>
   <div class="row">
-    <div><label>data columns</label><input id="columns" value="0"></div>
     <div><label>time column</label><input id="time_column" placeholder="none"></div>
+    <div><label>&nbsp;</label><button id="addseries" class="inline">+ series</button></div>
   </div>
-  <label>series &mdash; click a row to aim the drag at it</label>
+  <div id="avail" class="muted tiny"></div>
+  <label>series &mdash; each is a column or a sum of columns</label>
   <table id="serieslist"></table>
   <div class="chk"><input type="checkbox" id="samerange">
     <label for="samerange" style="margin:0">one range for all series</label></div>
@@ -688,21 +740,27 @@ function add(text, fn, isDir) {
 function fmt(n) { return n > 1e6 ? (n/1e6).toFixed(1)+" MB"
                  : n > 1e3 ? (n/1e3).toFixed(0)+" kB" : n+" B"; }
 // ---- series: one row per column, each with its own range --------------
-let series = [{column: 0, label: "", start: "", stop: ""}];
+let series = [{column: "0", label: "", start: "", stop: ""}];
 let active = 0;
 let previewInfo = null;
 
-function parseColumns() {
-  const raw = $("columns").value.split(/[,\s]+/).filter(s => s !== "");
-  const cols = raw.map(Number).filter(n => Number.isInteger(n) && n >= 0);
-  const kept = cols.length ? cols : [0];
-  // Keep whatever the user already typed for a column that is still here,
-  // so editing the list does not silently discard a label or a range.
-  const before = {};
-  for (const s of series) before[s.column] = s;
-  series = kept.map(c => before[c] || {column: c, label: "", start: "", stop: ""});
-  if (active >= series.length) active = 0;
-  renderSeries();
+let columnNames = [];
+function showAvailable() {
+  if (!columnNames.length) { $("avail").textContent = ""; return; }
+  $("avail").innerHTML = "columns in this file (click to insert): "
+    + columnNames.map((c, i) =>
+        '<a href="#" class="colchip" data-n="' + esc(c) + '">' + esc(c)
+        + "</a>").join(" ");
+  for (const a of $("avail").querySelectorAll(".colchip"))
+    a.onclick = ev => {
+      ev.preventDefault();
+      const box = document.querySelector(
+        '#serieslist input[data-f="column"][data-i="' + active + '"]');
+      if (!box) return;
+      box.value = box.value.trim() ? box.value + " - " + a.dataset.n : a.dataset.n;
+      series[active].column = box.value;
+      preview();
+    };
 }
 function renderSeries() {
   const rows = series.map((s, i) =>
@@ -725,6 +783,13 @@ function renderSeries() {
       series[Number(el.dataset.i)][el.dataset.f] = el.value;
       preview();
     };
+  for (const b of $("serieslist").querySelectorAll("button.drop"))
+    b.onclick = () => {
+      if (series.length < 2) return;
+      series.splice(Number(b.dataset.i), 1);
+      if (active >= series.length) active = series.length - 1;
+      renderSeries(); preview();
+    };
 }
 function esc(s) {
   return String(s === undefined || s === null ? "" : s)
@@ -733,7 +798,7 @@ function esc(s) {
 function requestBody(extra) {
   return Object.assign({
     path: picked, data_kind: $("data_kind").value,
-    columns: series.map(s => s.column),
+    columns: series.map(s => String(s.column)),
     labels: series.map(s => s.label),
     ranges: series.map(s => [s.start === "" ? null : Number(s.start),
                              s.stop === "" ? null : Number(s.stop)]),
@@ -755,6 +820,7 @@ async function preview() {
     const j = await r.json();
     if (j.error) { $("prep").innerHTML = ""; $("err").textContent = j.error; return; }
     previewInfo = j;
+    if (j.labels) { columnNames = j.labels; showAvailable(); }
     if (!$("rate").value || $("time_column").value) $("rate").value = j.rate_hz;
     drawPreview(j);
   } catch (e) { $("err").textContent = String(e); }
@@ -835,11 +901,14 @@ function applyRange(lo, hi) {
   preview();
 }
 
-$("columns").addEventListener("change", parseColumns);
+$("addseries").onclick = () => {
+  series.push({column: "", label: "", start: "", stop: ""});
+  active = series.length - 1; renderSeries();
+};
 $("samerange").addEventListener("change", () => { if (previewInfo) preview(); });
 for (const id of ["time_column", "unit", "data_kind"])
   $(id).addEventListener("change", preview);
-parseColumns();
+renderSeries();
 
 $("go").onclick = async () => {
   $("err").textContent = "";

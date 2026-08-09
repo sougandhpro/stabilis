@@ -255,3 +255,89 @@ def test_ragged_timestamps_report_their_jitter():
 def test_non_increasing_timestamps_are_refused():
     with pytest.raises(ValueError, match="do not increase"):
         infer_rate(np.array([5.0, 4.0, 3.0]))
+
+
+# ---------------------------------------------------------------------------
+# Derived columns
+# ---------------------------------------------------------------------------
+
+
+def table():
+    labels = ["time", "VSL", "NCS", "NRB"]
+    rows = np.array([[0.0, 10.0, 3.0, 1.0],
+                     [1.0, 20.0, 5.0, 2.0],
+                     [2.0, 30.0, 9.0, 4.0]])
+    return labels, rows
+
+
+def test_a_difference_of_two_named_columns():
+    from stabilis.edit import combine, parse_expression
+
+    labels, rows = table()
+    assert parse_expression("NCS - VSL", labels) == ((1, "NCS"), (-1, "VSL"))
+    assert combine("NCS - VSL", labels, rows).tolist() == [-7.0, -15.0, -21.0]
+
+
+def test_a_leading_minus_negates_a_single_column():
+    """`-VSL` is how "the other side of the difference" gets expressed."""
+    from stabilis.edit import combine
+
+    labels, rows = table()
+    assert combine("-VSL", labels, rows).tolist() == [-10.0, -20.0, -30.0]
+
+
+def test_columns_may_be_named_or_numbered():
+    """A file with no header is still usable."""
+    from stabilis.edit import combine
+
+    labels, rows = table()
+    assert np.array_equal(combine("2-1", labels, rows),
+                          combine("NCS - VSL", labels, rows))
+
+
+def test_several_terms_accumulate():
+    from stabilis.edit import combine
+
+    labels, rows = table()
+    assert combine("NCS + NRB - VSL", labels, rows).tolist() == [-6.0, -13.0, -17.0]
+
+
+def test_a_gap_in_either_term_makes_the_result_a_gap():
+    """A difference is unknown wherever either side is."""
+    from stabilis.edit import combine
+
+    labels, rows = table()
+    rows = rows.copy()
+    rows[1, 1] = np.nan
+    out = combine("NCS - VSL", labels, rows)
+    assert out[0] == -7.0 and np.isnan(out[1]) and out[2] == -21.0
+
+
+def test_an_unknown_column_is_refused_with_the_list_of_real_ones():
+    """A silent zero column would be a wrong answer that looks plausible."""
+    from stabilis.edit import parse_expression
+
+    labels, _rows = table()
+    with pytest.raises(ValueError, match="unknown column 'NOPE'"):
+        parse_expression("NOPE - VSL", labels)
+    with pytest.raises(ValueError, match="out of range"):
+        parse_expression("99", labels)
+    with pytest.raises(ValueError, match="empty column expression"):
+        parse_expression("   ", labels)
+
+
+def test_arithmetic_beyond_plus_and_minus_is_refused_not_evaluated():
+    """There is no evaluator here, deliberately.
+
+    This library refuses pickle because a file from someone else's rig is
+    untrusted input; an expression box wired to a Python evaluator would be
+    a far shorter path to running their code. Only whole columns, added and
+    subtracted.
+    """
+    from stabilis.edit import parse_expression
+
+    labels, _rows = table()
+    for hostile in ("NCS * VSL", "__import__('os').system('x')", "NCS / 2",
+                    "2 ** 40"):
+        with pytest.raises(ValueError):
+            parse_expression(hostile, labels)
