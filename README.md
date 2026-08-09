@@ -77,16 +77,17 @@ decision taken on your behalf — the tau grid, the gap policy, the degrees-
 of-freedom estimator actually used, any assumed bandwidth. That is what
 makes a number defensible later.
 
-Two subsystems stay off the top level on purpose. `stabilis.plot` needs
+Three subsystems stay off the top level on purpose. `stabilis.plot` needs
 matplotlib, so importing it here would drag an optional dependency into
 every `import stabilis`. `stabilis.bench` is the measurement-setup model,
 and `stats/` is forbidden to import it — keeping it a separate import keeps
-that independence visible.
+that independence visible. `stabilis.report` is the output layer, and its
+figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M2 complete, most of M3, and M5's bench model.** 648 tests;
-`stabilis validate` 31/31.
+**M0–M3 complete, M5's bench model, and the measurement report.** 844
+tests; `stabilis validate` 31/31.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -108,6 +109,13 @@ legitimately be quoted. Since then:
   that would fix it, *before any data is collected*.
 - **MTIE and TIE rms**, by binary doubling: 10⁶ points over 18 octave τ in
   0.15 s, where the naive form is O(N·m) per τ.
+- **TOTVAR** with its published bias correction, and **Thêo1 / ThêoBR /
+  ThêoH** — extending the usable τ range to 75 % of the record.
+- **The MODWT wavelet family**, four filters, with confidence intervals.
+  The Haar case returns the overlapping Allan variance *and* its error
+  bar, which is a cross-check of two independent code paths rather than a
+  special case.
+- **The measurement report** — see below.
 - **Plots** — σ(τ) with asymmetric error bars, power-law slope guides,
   phase, frequency, and the bench solution.
 
@@ -152,9 +160,47 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — the rest of M3: TOTVAR with its bias correction, Thêo1/ThêoH,
-and the MODWT wavelet family, whose acceptance test is bit-agreement with
-M1's AVAR.
+**Next** — `fit.py` and the multi-dataset layer (`multi/`), which gives the
+bench model real data to solve. Instrument readers wait on paired vendor
+exports.
+
+## The measurement report
+
+```bash
+stabilis report dut.dat --rate 1 \
+    --spec 1:2e-12 --spec 10:8e-13 --spec 100:3e-13 \
+    --subject "OCXO 42 vs H-maser" --out report.html
+```
+
+One self-contained HTML document per measurement: the σ(τ) table with its
+intervals, the noise type at each τ, the record's own description and
+hash, the full provenance step log, and a conformity verdict.
+
+The verdict is the part that differs from every other tool. **It is taken
+on the confidence interval, not on the point estimate.** A point passes
+only when its whole interval lies below the limit and fails only when the
+whole interval lies above it; an interval straddling the limit is reported
+`indeterminate`, meaning the record is too short to decide and the remedy
+is more data. Comparing the point estimate instead — what the field
+normally does — is simple acceptance with a ~50 % false-accept risk for a
+unit sitting on the limit, and it is worse than that here: at low degrees
+of freedom the point estimate is itself biased *low* (11.4 % at η = 2), so
+the error runs towards passing exactly where the evidence is thinnest.
+
+Nor is a limit interpolated. A datasheet states σ(τ) at particular τ; the
+tau grid is extended to land on each of them so the comparison is made
+where the specification actually lives, and a spec τ the record cannot
+reach is reported as not evaluated rather than guessed at.
+
+It also states what it cannot conclude: a two-source comparison bounds the
+device under test from *above*, so a pass is conclusive while a failure
+may belong to the reference or to the measurement channel. Separating
+those is what the bench model does. See `stabilis docs report`.
+
+This is a measurement report, not a calibration certificate — it asserts
+no traceability chain and makes no accreditation claim. `stabilis
+validate` is the separate, and different, question of whether the software
+is right.
 
 ## A GUI, for when flags are tedious
 

@@ -123,6 +123,31 @@ before it may be trusted, and that pairing is the acceptance test.
 
 ---
 
+## 4. The conformity verdict inherits its interval's accuracy
+
+**Status: open by construction, and bounded rather than unknown.**
+
+`stabilis report` decides conformity on the confidence interval, so the
+verdict is exactly as good as the degrees of freedom behind it. The
+decision rule itself is fully tested at both boundaries
+(`tests/test_report.py`), and the intervals have measured Monte-Carlo
+containment — but the two facts do not compose into a stated false-accept
+risk, because containment is measured *over an ensemble* while a verdict
+is issued on *one record*.
+
+What is missing is a measured operating-characteristic curve: over many
+realizations of a unit at a known distance from a limit, the observed rate
+of `pass`, `fail` and `indeterminate`. That is the number a laboratory
+needs to set a decision rule under ISO/IEC 17025 clause 7.8.6, and it is
+cheap to measure with the machinery already here — a Monte-Carlo row in
+the validation report, not new theory.
+
+Until then the report states the rule it used and the interval it used it
+on, which lets a reader derive the risk themselves. It does not state a
+risk figure, and must not be read as having done so.
+
+---
+
 ## Not debt
 
 For the avoidance of doubt, these are *already* validated and are not

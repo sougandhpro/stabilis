@@ -23,6 +23,7 @@ import numpy as np
 
 __all__ = [
     "SLOPES",
+    "SPEC_STYLE",
     "sigma_tau",
     "slope_guides",
     "spec_points",
@@ -44,6 +45,14 @@ SLOPES = {
     "FFM": 0.0,
     "RWFM": 0.5,
 }
+
+
+# How a *claim* is drawn, as opposed to a measurement: open markers, dashed,
+# never the solid-filled style of real data. Named rather than inlined because
+# the measurement report draws spec points too, and the one thing that must
+# not drift between the two is the visual distinction itself.
+SPEC_STYLE = {"marker": "s", "markerfacecolor": "none", "linestyle": "--",
+              "linewidth": 1.0, "alpha": 0.8}
 
 
 def _axes(ax):
@@ -138,8 +147,7 @@ def spec_points(source, ax=None, **kwargs):
     ax = _axes(ax)
     tau = np.array([p[0] for p in source.spec_adev])
     dev = np.array([p[1] for p in source.spec_adev])
-    style = {"marker": "s", "markerfacecolor": "none", "linestyle": "--",
-             "linewidth": 1.0, "alpha": 0.8}
+    style = dict(SPEC_STYLE)
     style.update(kwargs)
     ax.plot(tau, dev, label=f"{source.id} (spec, not measured)", **style)
     ax.set_xscale("log")

@@ -12,14 +12,17 @@ submodule something lives in. That is a promise: **the names in `__all__`
 below are the public API** and will not move without a version bump, while
 anything reached through a submodule path may.
 
-Two subsystems are deliberately *not* re-exported, and their absence is the
-documentation:
+Three subsystems are deliberately *not* re-exported, and their absence is
+the documentation:
 
 * `stabilis.bench` -- the measurement setup. Optional, and `stats/` is
   forbidden to import it, so keeping it off the top level keeps that
   separation visible.
 * `stabilis.plot` -- needs matplotlib. Importing it here would drag an
   optional dependency into every `import stabilis`.
+* `stabilis.report` -- the customer-facing measurement report. Its figure
+  path wants matplotlib for the same reason, and it is an output layer
+  rather than part of the analysis API.
 
     import numpy as np
     from stabilis import load_phase, oadev, confidence
