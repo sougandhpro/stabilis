@@ -74,7 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats.add_argument("--json", action="store_true", help="emit JSON")
     p_stats.set_defaults(func=_cmd_stats)
 
-    from .stats import adev, mdev, mtie, oadev, ohdev, tdev, tierms, totdev
+    from .stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, tierms,
+                    totdev)
 
     # MTIE and TIE rms take no confidence arguments: they are not variances,
     # so the chi-square interval does not apply and `confidence` refuses
@@ -87,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("tdev", tdev),
         ("ohdev", ohdev),
         ("totdev", totdev),
+        ("theo1", theo1),
         ("mtie", mtie),
         ("tierms", tierms),
     ):

@@ -39,6 +39,7 @@ import math
 import numpy as np
 
 __all__ = [
+    "THEO1_BIAS_MEASURED",
     "totvar_bias",
     "TOTVAR_BIAS_A","deviation_bias_factor", "unbias_deviation"]
 
@@ -133,3 +134,18 @@ def totvar_bias(alpha: int, tau_s, record_s: float) -> np.ndarray:
             "the long-tau points instead."
         )
     return 1.0 / denominator
+
+
+# Thêo1's bias against AVAR, at the same tau, for m >~ 100.
+#
+# **Measured here, not published.** 60 realizations at N=8192 of each power
+# law, Thêo1 against an interpolated overlapping AVAR at Thêo1's own tau.
+# White FM comes out at 1.00, which is the property that identified the
+# missing 0.75 in SP 1065 eq. (30) -- see stats/theo1.py. The FM biases are
+# real and are what Howe's TheoBR exists to remove by averaging Thêo1
+# against AVAR over the range where both are defined.
+#
+# TheoBR is not implemented, so these are here to be *reported*, not
+# silently applied: a number divided by a ratio measured on synthetic noise
+# is not the same thing as a number corrected by a published estimator.
+THEO1_BIAS_MEASURED = {0: 1.00, -1: 0.55, -2: 0.37}

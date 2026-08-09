@@ -7,6 +7,7 @@ from .core import Shape, StabilityResult
 from .edof import edof, eta1, eta3
 from .greenhall import greenhall_edof, greenhall_edof_pooled
 from .mtie import mtie, tierms
+from .theo1 import theo1
 from .total import totdev, totvar_extend
 from .noiseid import NoiseID, identify, identify_curve
 from .powerlaw import PowerLawFit, decompose
@@ -22,6 +23,7 @@ __all__ = [
     "mtie",
     "tierms",
     "totdev",
+    "theo1",
     "Confidence",
     "confidence",
     "ONE_SIGMA",
