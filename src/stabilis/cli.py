@@ -372,6 +372,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_check.add_argument("--json", action="store_true", help="emit JSON")
     p_check.set_defaults(func=_cmd_bench_check)
 
+    p_rec = bench_sub.add_parser(
+        "recommend",
+        help="which technique this setup supports -- hat, cross-correlation, "
+             "or both -- and which assumption each answer rests on",
+    )
+    p_rec.add_argument("path", help="bench.json")
+    p_rec.add_argument("--json", action="store_true", help="emit JSON")
+    p_rec.set_defaults(func=_cmd_bench_recommend)
+
     p_solve = bench_sub.add_parser(
         "solve", help="N-cornered hat and channel floors, one solve per tau"
     )
@@ -1076,6 +1085,38 @@ def _cmd_bench_check(args) -> int:
     else:
         print(ident.report())
     return 0 if ident.identifiable else 2
+
+
+def _cmd_bench_recommend(args) -> int:
+    """Hat, cross-correlation, or both. Reads no data files.
+
+    Exit status is 0 when *something* determines the sources -- the hat on
+    its own, or the hat once a repeated edge has removed the channel term.
+    A bench that neither closes is still a 2, the same as `bench check`.
+    """
+    from .bench import load
+    from .bench.recommend import recommend
+
+    bench = load(args.path, verify_hashes=False)
+    rec = recommend(bench)
+    if args.json:
+        print(json.dumps({
+            "hat_identifiable": rec.hat_identifiable,
+            "hat_deficiency": rec.hat_deficiency,
+            "would_identify": rec.would_identify,
+            "channels_determined": list(rec.channels_determined),
+            "opportunities": [
+                {"source_a": o.source_a, "source_b": o.source_b,
+                 "measurements": list(o.measurements),
+                 "channels": list(o.channels), "devices": list(o.devices),
+                 "quality": o.quality}
+                for o in rec.opportunities
+            ],
+            "notes": list(rec.notes),
+        }, indent=2))
+    else:
+        print(rec.report())
+    return 0 if (rec.hat_identifiable or rec.would_identify) else 2
 
 
 def _cmd_bench_solve(args) -> int:

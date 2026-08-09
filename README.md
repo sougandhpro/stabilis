@@ -86,7 +86,7 @@ figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M3 and M5 complete, and the measurement report.** 972 tests;
+**M0–M3 and M5 complete, and the measurement report.** 986 tests;
 `stabilis validate` 33/33.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
@@ -109,6 +109,10 @@ legitimately be quoted. Since then:
   that would fix it, *before any data is collected* — and saying which of
   those you already have, since two clocks against a common reference are
   one subtraction away from the edge that closes the triangle.
+  `stabilis bench recommend` goes further and says *which technique* the
+  setup supports, since the hat and cross-correlation are not alternatives:
+  the hat separates the sources, cross-correlation removes the channel
+  term, and a bench with both needs neither assumption.
 - **Cross-variances and multi-channel noise rejection** — channels
   watching one clock, so the instruments' own noise cancels in expectation
   instead of forming a floor you cannot get under. Neither Stable32 nor
@@ -224,6 +228,39 @@ one channel. So `cross_variance(a, a)` returns the auto-variance **and its
 interval** bit for bit — the chi-square error bar is the auto case of this
 one, not a parallel construction. `stabilis docs cross` tabulates the two
 estimators that were tried first and rejected, and where each fails.
+
+### Hat or cross-correlation, from the graph
+
+```bash
+stabilis bench recommend bench.json
+```
+
+They are not alternatives — they remove different unknowns from the same
+design matrix:
+
+|  | separates the sources | removes the channel term |
+|---|---|---|
+| **N-cornered hat** (odd cycle among different sources) | **yes** | no: declare the floor, or measure it back-to-back |
+| **cross-correlation** (one edge measured twice, through different channels) | no | **yes, in expectation**, declaring nothing |
+
+So they compose, and the composition is worth having. Measure A against B
+twice through two *independent* channels, and the cross-variance of those
+records is `σ²_A + σ²_B` with the channel noise rejected — a hat row with
+no channel term. **That is the classical three-cornered hat's missing
+row.** Three sources through one channel is four unknowns against three
+rows, and the textbook fix is to assert `σ²_channel = 0`, which nobody
+measured. One repeated edge closes the same system having measured it
+instead, and `recommend` says so by adding the derived row to a
+hypothetical bench and re-running the identifiability check.
+
+One correction worth stating, because this library had it backwards in a
+warning string until it was checked: two channels of **one** instrument are
+not the good case for cross-correlation. It rejects the part of the channel
+noise the two channels do not share; the part they do — one timebase, one
+LO, one supply, one oven — passes straight through, and the residual is a
+floor rather than something more data lowers. Independent instruments are
+better for *both* techniques. `recommend` reports the same-device case as
+capped rather than clean, and does not let it close a system.
 
 ### More channels
 

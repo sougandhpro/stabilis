@@ -140,9 +140,9 @@ def common_mode_warnings(bench: Bench) -> tuple[str, ...]:
                 "instrument noise is common and does **not** cancel in the "
                 "hat. This is the dangerous case, because the answer still "
                 "looks reasonable. Independent instruments are what the "
-                "method assumes. (The same setup is the *good* case for "
-                "cross-correlation, which wants to reject exactly that "
-                "shared noise -- see theory/bench.md.)"
+                "method assumes -- and are better for cross-correlation "
+                "too, which rejects only the part two channels do NOT "
+                "share. See `bench recommend`."
             )
 
     shared: dict[str, list[str]] = {}

@@ -298,6 +298,70 @@ conversation. What comes down is `store.to_dict` output, round-tripped
 through the library on the last check, so a bench the model would reject
 cannot be saved at all.
 
+## Which technique, and the two-by-two
+
+`bench check` answers "can the hat separate these oscillators", and asking
+only that is a mistake, because the hat is not the only thing a bench can
+do. There are two techniques and **they are not alternatives** — they
+remove different unknowns from the same design matrix:
+
+|  | separates the sources | removes the channel term |
+|---|---|---|
+| **N-cornered hat** — pairwise edges among *different* sources, containing an odd cycle | **yes** | no: declare the floor, or measure it back-to-back |
+| **cross-correlation** — one edge measured *twice* through *different* channels | no | **yes, in expectation**, declaring nothing |
+
+The design matrix has a column per source and a column per undeclared
+channel. The odd cycle is what makes the source columns solvable; a
+repeated edge is what makes a channel column unnecessary. A bench with
+both needs neither assumption.
+
+### The composition is the useful part
+
+Measure A against B **twice, through two independent channels**. The
+cross-variance of those two records estimates `σ²_A + σ²_B` with the
+channel noise rejected — which is a hat row with no channel term.
+
+That is the classical three-cornered hat's missing row. Three sources
+through one channel is four unknowns against three rows and hopeless; the
+textbook fix is to assert `σ²_channel = 0`, which is an assumption nobody
+measured. One repeated edge closes the same system having measured it
+instead. `bench.recommend` computes exactly this, by adding the derived row
+to a hypothetical bench and re-running `check`, and reports which channels
+become determined as a result — subtract the derived row from a real row
+and what is left is that row's channel.
+
+### A correction, because the earlier draft had it backwards
+
+It is tempting to say that two channels of one instrument are the *good*
+case for cross-correlation, since the shared instrument noise is exactly
+what you want to reject. **That is wrong**, and it was written into a
+warning string before it was checked. Cross-correlation rejects the part of
+the channel noise that is *independent* between the two channels. The part
+they share — one timebase, one LO, one supply, one oven — passes straight
+through:
+
+    x_1 = x_ab + n_common + n_1'
+    x_2 = x_ab + n_common + n_2'
+    E[d_1 · d_2] = Var(x_ab) + Var(n_common)
+
+So two channels of one device is better than one channel and worse than
+two devices, and the residual is a **floor**, not something more data
+lowers. **Independent instruments are better for both techniques.** What is
+true of the same-device case is only that it is a configuration
+cross-correlation can use at all and the hat cannot, both records naming
+the same source pair — and `recommend` reports it as capped rather than
+clean, which is why `would_identify` counts only the clean ones.
+
+Two records through *one* channel are not an opportunity at any quality.
+One channel cannot make two simultaneous measurements, so either they are
+the same record described twice — which `common_mode_warnings` already
+catches — or they ran at different times, and neither gives two
+independent views of one interval.
+
+When both techniques apply, run both. They answer different questions, so a
+disagreement between them is informative: it is the channel floor the hat
+had to assume.
+
 ## Independence from `stats/`
 
 **`stats/` must never import `bench/`.** An AST test over the whole `stats`
@@ -326,6 +390,10 @@ layer and becomes a dependency of every ADEV anyone computes.
 * MTIE, mixed estimators, unidentifiable benches, benches with no common
   tau, unknown schema versions and changed data files are each refused with
   a directed message.
+
+`tests/test_recommend.py` covers the technique verdict: the classical hat
+closed by a repeated edge, the same edge on one instrument reported as
+capped instead, the back-to-back case, and the exit status.
 
 `tests/test_gui_bench.py` covers the interactive path over real HTTP: the
 graph verdicts again through the endpoint, the hat recovering three clocks
