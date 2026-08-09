@@ -35,7 +35,9 @@ from stabilis.reference import (
     nbs14_9point,
 )
 from stabilis.stats import adev, mdev, oadev, ohdev, tdev
-from stabilis.synth import power_law_freq, power_law_noise
+from stabilis.multi import cross_variance
+from stabilis.synth import (power_law_freq, power_law_noise,
+                            power_law_phase)
 from stabilis.types import FreqSeries, PhaseSeries, to_frequency, to_phase
 from stabilis.validate.certified import (
     certified_deviation,
@@ -293,6 +295,56 @@ def measure_gap_handling():
     return rows
 
 
+CROSS_TRIALS = 120
+
+
+def measure_cross_rejection():
+    """What two channels see that one cannot, against the clock itself.
+
+    One white-FM clock, two channels with independent white-PM noise at a
+    level that buries it: at tau = 1 s the clock is about a third of the
+    single-channel deviation, so the auto-variance is answering a question
+    about the instrument. The truth is the clock record's *own* oadev, not
+    a closed form and not a fit, so what is measured is the rejection
+    rather than the estimator's self-consistency.
+
+    Ratios are averaged over realizations for the same reason the gap table
+    is: on any one record either estimate can land close by luck, and the
+    figure that means something is where each is centred. The reported
+    scatter is the ensemble spread of the cross ratio, which is the price
+    paid for the rejection and belongs beside it.
+    """
+    rng = np.random.default_rng(20260809)
+    n, rate = 8192, 1.0
+    auto, cross, rej, sem = [], [], [], []
+    for _ in range(CROSS_TRIALS):
+        clock = power_law_phase(n, 0, rate, rng, 1.0e-24)
+        a = PhaseSeries(x=clock.x + power_law_phase(n, 2, rate, rng, 1.0e-22).x,
+                        rate_hz=rate)
+        b = PhaseSeries(x=clock.x + power_law_phase(n, 2, rate, rng, 1.0e-22).x,
+                        rate_hz=rate)
+        x = cross_variance(a, b, max_af=64)
+        truth = oadev(clock, max_af=64).var
+        auto.append(x.auto_a / truth)
+        cross.append(x.var / truth)
+        rej.append(x.rejection_db)
+        sem.append(x.sem / truth)
+        af, tau = x.af, x.tau_s
+    auto, cross = np.array(auto), np.array(cross)
+    return [
+        {
+            "tau": float(tau[i]),
+            "af": int(af[i]),
+            "auto": float(np.mean(auto[:, i])),
+            "cross": float(np.mean(cross[:, i])),
+            "spread": float(np.std(cross[:, i], ddof=1)),
+            "sem": float(np.mean(np.array(sem)[:, i])),
+            "rej": float(np.mean(np.array(rej)[:, i])),
+        }
+        for i in range(af.size)
+    ]
+
+
 def measure_generator():
     """The NBS14 recursion against its published check values."""
     ints = nbs14_1000point_integers(3)
@@ -412,6 +464,7 @@ def build_html():
     identities = measure_identities()
     gen = measure_generator()
     gaps = measure_gap_handling()
+    crossing = measure_cross_rejection()
     tests = run_tests()
     git = git_state()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -425,8 +478,9 @@ complete — the v0.1 line, the first version from which an uncertainty may
 legitimately be quoted — and most of M3: Greenhall EDOF, which is error-bar
 parity with Stable32; the exact non-negative least squares core and the
 power-law decomposition built on it; TOTVAR, the Thêo family and the MODWT
-wavelet variance. The M5 bench model is built ahead of its milestone, being
-the part with no equivalent in any other tool.</p>
+wavelet variance. Two pieces of M5 are built ahead of their milestone, being
+the parts with no equivalent in any other tool: the bench model, and the
+cross-variance.</p>
 <div class="meta">
 generated {esc(now)} &nbsp;·&nbsp; stabilis {esc(stabilis.__version__)} &nbsp;·&nbsp;
 numpy {esc(np.__version__)} &nbsp;·&nbsp; python {esc(platform.python_version())}<br>
@@ -662,6 +716,86 @@ reason this
 defect had to be fixed first, since it feeds the term count that sets η.</p></div>"""
     )
 
+    parts.append("<h2>Results: seeing under the instrument</h2>")
+    parts.append(
+        """<p>Every estimator here is a mean of squared coefficients. Measure one
+clock through two independent channels and replace one factor with the other
+channel's coefficients, and the instrument noise stops being a floor: writing
+x<sub>a</sub> = x<sub>c</sub> + n<sub>a</sub> and x<sub>b</sub> = x<sub>c</sub> +
+n<sub>b</sub>, the auto-variance of either is σ²<sub>c</sub> + σ²<sub>n</sub>
+however long you log, while E[d<sub>a</sub>d<sub>b</sub>] = E[d<sub>c</sub>²]
+exactly, because the two cross terms have expectation zero. Neither Stable32 nor
+<code>allantools</code> computes this.</p>
+<p>Measured at generation time over TRIALS realizations of a white-FM clock
+seen through two white-PM channels, 8192 points each. Both columns are ratios
+to <em>the clock record's own</em> σ²(τ) — not a closed form and not a fit — so
+the table is the rejection itself rather than a consistency check. A ratio of
+1.00 is the right answer; the auto column is what a single channel would have
+told you.</p>""".replace("TRIALS", str(CROSS_TRIALS))
+    )
+    parts.append(
+        table(
+            ["τ (s)", "auto / truth", "cross / truth", "ensemble spread",
+             "reported ± ", "rejection"],
+            [
+                (
+                    f"{r['tau']:g}",
+                    f"{r['auto']:.2f}×",
+                    f"{r['cross']:.3f}×",
+                    f"{r['spread'] * 100:.1f}%",
+                    f"{r['sem'] * 100:.1f}%",
+                    f"{r['rej']:.1f} dB",
+                )
+                for r in crossing
+            ],
+            numeric=(0, 1, 2, 3, 4, 5),
+        )
+    )
+    parts.append(
+        """<div class="note"><strong>At τ = 1 s the single-channel answer is
+several times the clock it was meant to measure, and the cross estimate is
+within a percent of it.</strong> The two converge at long τ, and that is
+correct rather than disappointing: by then the instrument's white PM has
+averaged down and there is nothing left to reject, which is exactly why the
+short-τ end is the only place the method is being tested.
+<p>Three prices, printed rather than hidden. The estimate is a mean of products
+and is <em>signed</em>: at long τ it goes negative, which means the shared part
+has fallen below the scatter, and nothing clips it or reports √|var| — a log
+axis would otherwise grow a noise floor that is not there. Convergence is slow,
+because only the <em>estimate</em> of the instrument noise averages down, as
+M<sup>1/4</sup> in amplitude; the rejection column is what was actually
+achieved, and reduces to the familiar 5·log₁₀(M) law as a consequence of the
+error bar rather than as a substitute for one. And correlated channels — a
+shared reference, a shared supply, one thermal environment — break the method
+with no symptom whatever in the data, so the independence assumption is a
+provenance warning on every call.</p>
+<p>The error bar cannot be the χ² one, a sum of products being unbounded below.
+Isserlis' theorem gives (auto<sub>a</sub>·auto<sub>b</sub> + cross²)/η, which is
+2σ⁴/η when the two channels are the same channel — so
+<code>cross_variance(a, a)</code> returns the auto-variance bit for bit and its
+error bar <em>is</em> the chi-square one, rather than a parallel construction
+that could drift from it.</p>
+<p>The two right-hand columns are deliberately not the same quantity, and the
+gap between them at long τ is the interesting part. "Ensemble spread" is the
+scatter of the ratio against <em>this realization's own clock record</em>,
+which is what a user comparing two channels of one oscillator actually wants to
+know; "reported ±" is the standard error about the population variance, which
+additionally carries the clock's own sampling variation. At short τ the
+instrument dominates and the two coincide. At long τ the clock dominates, both
+channels see the same clock record, and the conditional error collapses while
+the unconditional one does not — so the reported bar is conservative for that
+question, correctly, since nothing in one measurement can tell it which
+question was being asked. Against the quantity it does claim — the scatter of
+the estimate about the truth — it is measured at ±20% out to m = N/4 in
+<code>tests/test_cross.py</code>. The obvious alternative — a Bartlett sum over the
+products' own autocovariance, assuming no distribution at all — was built first
+and measures 0.89 / 0.73 / 0.56 / 0.37 / 0.30 of that scatter from m = N/64 to
+N/4. The products are heavy-tailed where the coefficients are Gaussian, so each
+extra lag of their sample autocovariance adds more noise than signal. Both
+estimators are kept in the test suite and measured on the same realizations, so
+the reason for the choice stays a live number.</p></div>"""
+    )
+
     parts.append("<h2>Design decisions worth recording</h2>")
     parts.append(
         """
@@ -780,11 +914,60 @@ puts the first 10% low at m=10. For a tool whose product is correctness, being
 able to show the evidence for each departure is the deliverable, not a
 footnote.</li>
 <li><strong>The output and interaction layer</strong> — plotting, a flat 30-name
-public API, and <code>stabilis gui</code>, a local browser page in three stages
+public API, and <code>stabilis gui</code>, a local browser page in four stages
 that computes nothing itself: every variance and bound on it comes from the
 same calls the CLI makes, and every selection prints the equivalent
 non-interactive script, because an exclusion that exists only as a mouse
-gesture is not evidence.</li>
+gesture is not evidence. The fourth stage is the bench, which is the only one
+that reads several files at once and therefore the one that assumes least
+about them.</li>
+<li><strong>M5's two differentiators, built ahead of their milestone.</strong>
+The <strong>bench model</strong> describes the actual experiment as sources,
+devices and channels, and turns three-cornered hat, N-cornered hat and
+instrument noise-floor subtraction into one non-negative linear solve per τ
+rather than three features. The part with no equivalent anywhere is the
+refusal: identifiability is a graph property — a connected set of measurements
+determines its oscillators individually <em>iff it contains an odd cycle</em>,
+which is why the technique is called <em>three</em>-cornered hat — so a ring of
+four determines nothing however long it runs, and <code>stabilis bench
+check</code> says so <em>before any data is collected</em> and names the one
+extra measurement that would fix it. It also distinguishes the pairs you must
+go and measure from the pairs you already have, since x<sub>ab</sub> =
+x<sub>ac</sub> − x<sub>bc</sub> identically: two clocks against a common
+reference are one subtraction away from the edge that closes the triangle, and
+a four-clock ring needs no new data at all.<br>
+The <strong>cross-variance</strong> is the other half of the same idea, one
+level down. Two channels watching one clock: the auto-variance of either is
+floored at σ²<sub>c</sub> + σ²<sub>n</sub> however long you log, but the
+difference operator is linear, so E[d<sub>a</sub>d<sub>b</sub>] =
+E[d<sub>c</sub>²] when the channels' noise is independent — the instrument term
+has expectation zero rather than being small. It costs one function for the
+whole estimator family, because every result already carries the coefficient
+array it averaged and the cross case is <code>mean(c_a·c_b)</code> where the
+auto case is <code>mean(c²)</code>. Its error bar cannot be the χ² one, a sum
+of products being unbounded below; Isserlis' theorem gives
+(auto_a·auto_b + cross²)/η instead, which is 2σ⁴/η when the two channels are
+the same channel — so <code>cross_variance(a, a)</code> returns the
+auto-variance bit for bit and the two error bars are one construction rather
+than two. Negative variances are reported signed rather than clipped in both,
+because they are the method telling you an independence assumption failed.</li>
+<li><strong>The measurement report</strong>, which is the actual paid
+deliverable and now exists: one self-contained HTML document per measurement,
+carrying the σ(τ) table with its intervals, the noise type at each τ, the
+record's own hash, the full provenance step log, and a conformity verdict.
+The verdict is the part that differs from every other tool — <strong>it is
+taken on the confidence interval, not on the point estimate.</strong> A point
+passes only when its whole interval lies below the limit and fails only when
+the whole interval lies above it; an interval straddling the limit is reported
+<em>indeterminate</em>, meaning the record is too short to decide and the
+remedy is more data. Comparing the point estimate instead — what the field
+normally does — is simple acceptance with a ~50% false-accept risk for a unit
+sitting on the limit, and it is worse than that here, because at low degrees of
+freedom the point estimate is itself biased low (11.4% at η = 2) and the error
+therefore runs towards passing exactly where the evidence is thinnest. Three
+rules follow and each is a test: a limit is never interpolated between the taus
+a datasheet states, no interval means no verdict, and a two-source pass is
+conclusive while a failure is not attributable.</li>
 </ul>
 
 <h3>Next</h3>
@@ -795,26 +978,14 @@ no longer "implements the published algorithm" but "matches Stable32 to the
 precision it prints". Still to come: the public NBS suites and, most valuable
 of all, a real oscillator record, being the only case where the data was not
 generated by the tool under test.</li>
-<li><strong>M5, already begun</strong> — the <strong>bench model</strong>, which
-describes the actual experiment as sources, devices and channels, and turns
-three-cornered hat, N-cornered hat and instrument noise-floor subtraction into
-one non-negative linear solve per τ rather than three features. The part with no
-equivalent anywhere is the refusal: identifiability is a graph property —
-a connected set of measurements determines its oscillators individually
-<em>iff it contains an odd cycle</em>, which is why the technique is called
-<em>three</em>-cornered hat — so a ring of four determines nothing however long
-it runs, and <code>stabilis bench check</code> says so <em>before any data is
-collected</em> and names the one extra measurement that would fix it. Negative
-variances are reported signed rather than clipped, because they are the method
-telling you an independence assumption failed.</li>
 <li><strong>M4–M8</strong> — instrument readers, which are gated on paired
 vendor exports rather than on effort: a binary format with no public
 specification can only be accepted if the same capture is also available as
 vendor ASCII to check the reader against. Then model fitting against the χ²
-likelihood, the rest of M5, cross-variances and multi-dataset handling,
-realtime ingest with attributed time tagging and dynamic Allan variance, and
-the signed measurement report — which is the actual paid deliverable, and for
-which every piece of machinery now exists.</li>
+likelihood, the rest of <code>multi/</code> — the N-channel sweep and the
+software rejection of a multi-channel capture, the alignment and the pairwise
+estimator being done — realtime ingest with attributed time tagging, and
+dynamic Allan variance.</li>
 </ul>
 
 <div class="note"><strong>Known limitations.</strong> Confidence intervals now
@@ -844,7 +1015,18 @@ EDF table is not implemented, so the CLI offers no interval flags for it rather
 than flags that would fail. ThêoBR's bias correction is measured from the data
 and is itself noisy on a single record — a common vertical shift of the whole
 curve, not scatter between points — so the ratio is reported in provenance
-rather than folded silently into the answer.</div>"""
+rather than folded silently into the answer. The conformity verdict inherits
+its interval's accuracy: the decision rule is fully tested at both boundaries
+and the intervals have measured containment, but containment is an ensemble
+statement while a verdict is issued on one record, so the two do not compose
+into a stated false-accept risk — what is missing is an operating-characteristic
+curve, and until it exists the report states the rule and the interval it used
+rather than a risk figure. The cross-variance has no interop tier and can never
+have one, since no other tool computes it and manufacturing a reference from
+this library's own output would make the assertion a statement about itself;
+its evidence is correspondingly heavier on the functional side, and the
+hardware half — two real channels, deliberately sharing a reference in one run
+and not in another — is still owed.</div>"""
     )
     return "\n".join(parts)
 
