@@ -26,14 +26,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dataclasses import replace
+
 import numpy as np
 
 from .._specfun import chi2_ppf
-from ..log import record
+from ..log import record, warn
 from ..provenance import Provenance
 from .core import StabilityResult
 from .edof import EDOF_METHODS, edof
 from .greenhall import GREENHALL_RUN_POLICIES, greenhall_edof_pooled
+from .edof import eta3, totvar_edof
 
 __all__ = ["Confidence", "confidence", "chi2_interval", "ONE_SIGMA", "TWO_SIGMA"]
 
@@ -226,7 +229,22 @@ def confidence(
         )
 
     alphas = None
-    if method == "greenhall":
+    if method == "totvar":
+        alphas = alpha_per_tau(result, alpha, series)
+        record_s = float(result.n_terms[0] + 2) / result.rate_hz
+        etas, used = [], []
+        for tau, a in zip(result.tau_s, alphas):
+            if int(a) in (2, 1):
+                # SP 1065 defines these against the overlapping ADEV's edf
+                # plus two, so the Allan count is what it is built on.
+                allan = eta3(int(result.n_terms[0]), 1, result.span_factor)
+                etas.append(totvar_edof(int(a), float(tau), record_s,
+                                        overlapping_edof=allan))
+            else:
+                etas.append(totvar_edof(int(a), float(tau), record_s))
+            used.append("totvar")
+        declined = [""] * len(etas)
+    elif method == "greenhall":
         if result.shape is None:
             raise ValueError(
                 f"{result.kind}: this estimator declares no Shape, so the "
@@ -242,6 +260,7 @@ def confidence(
             etas.append(eta)
             used.append(how)
         declined = [""] * len(etas)
+
 
     eta = np.asarray(etas, dtype=np.float64)
     lo, hi = chi2_interval(result.var, eta, level)

@@ -193,6 +193,50 @@ def test_the_pm_noises_are_defined_against_the_allan_edof():
         totvar_edof(1, 1.0, 100.0)
 
 
+@pytest.mark.slow
+def test_eta1_beats_the_published_formula_on_totvar():
+    """The measurement that reversed a claim made here.
+
+    It looked obvious that a coefficient-based EDOF must overstate TOTVAR's
+    confidence, since the coefficient array stays `N-2` long at every tau
+    by reusing reflected data. That was written into the theory page and
+    into a warning before it was checked, and it is **wrong**.
+
+    `eta1` does not count terms -- it reads the degrees of freedom off the
+    coefficients' own autocovariance, which is exactly where the
+    reflection-induced correlation lives. Against the definitional truth
+    `2*sigma^4/Var(sigma_hat^2)`, it tracks within a few percent and beats
+    the published `b(T/tau)-c` at short tau, where that formula returns
+    more degrees of freedom than the record has terms.
+    """
+    from stabilis.stats.edof import eta1
+
+    n, trials = 4096, 300
+    rng = np.random.default_rng(11)
+    runs = []
+    for _ in range(trials):
+        ps = power_law_phase(n, 0, rate_hz=1.0, rng=rng)
+        runs.append(totdev(ps, taus="octave", keep_coeffs=False).var)
+    v = np.array(runs)
+    truth = 2.0 * v.mean(axis=0) ** 2 / v.var(axis=0)
+
+    ps = power_law_phase(n, 0, rate_hz=1.0, rng=np.random.default_rng(1))
+    t = totdev(ps, taus="octave")
+
+    for i in (0, 4, 8):
+        tau, m = float(t.tau_s[i]), int(t.af[i])
+        measured = eta1(t.coeffs[i], m)
+        published = totvar_edof(0, tau, float(n))
+        assert measured == pytest.approx(truth[i], rel=0.25), (
+            f"eta1 at tau={tau:g} is {measured:.0f} against a measured "
+            f"{truth[i]:.0f}")
+        if i == 0:
+            # tau = tau0: the published formula gives 1.5*N, which is more
+            # degrees of freedom than there are terms.
+            assert published > t.n_terms[0]
+            assert abs(measured / truth[i] - 1) < abs(published / truth[i] - 1)
+
+
 def test_the_edof_is_far_below_what_the_term_count_suggests():
     """Why the published formula is needed rather than counting terms.
 

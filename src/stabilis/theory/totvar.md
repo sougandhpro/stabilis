@@ -67,12 +67,38 @@ This is the coupling that makes TOTVAR different in kind from the classical
 family — its answer depends on identifying the noise first, which is the
 assumption this library's confidence intervals otherwise avoid.
 
-## Degrees of freedom — do not count the terms
+## Degrees of freedom — and a claim that measurement reversed
 
-TOTVAR reports `N-2` terms at every tau *by reusing reflected data*. A
-data-driven estimator handed those coefficients sees a long array and
-reports a confidence the record cannot support. SP 1065 gives the real
-count:
+The obvious worry is that TOTVAR reports `N-2` terms at every tau *by
+reusing reflected data*, so anything counting those terms credits the
+record with information it does not have. That is true of `eta3`, which
+counts non-overlapping windows.
+
+**It is not true of `eta1`, and this was asserted here the wrong way round
+before it was measured.** `eta1` does not count terms; it reads the
+degrees of freedom off the coefficients' own autocovariance, which is
+exactly where the reflection-induced correlation shows up. Measured against
+`2*sigma^4/Var(sigma_hat^2)` over 400 realizations of white FM at N=4096:
+
+| tau | measured | `eta1` | published `b(T/tau)-c` |
+|---|---|---|---|
+| 1 | 2673 | **2735** (1.02x) | 6144 (2.30x) |
+| 16 | 351 | **351** (1.00x) | 384 (1.09x) |
+| 256 | 22.3 | 20.6 (0.92x) | 24.0 (1.08x) |
+| 1024 | 6.8 | 5.9 (0.87x) | 6.0 (0.88x) |
+
+`eta1` tracks the truth to within a few percent, and beats the published
+formula at short tau — where `b(T/tau)` returns 6144 for a record that has
+only 4094 terms in it, which is the sign of an asymptotic expression being
+used outside its range.
+
+So **`auto` is right for TOTVAR too**, and needs no special case. The
+published formula is still worth having, and `method="totvar"` applies it,
+for the same reason the Greenhall path exists: it is what Stable32 prints,
+and reproducing a lab's existing numbers is a separate goal from getting
+the best answer.
+
+SP 1065 gives it as:
 
     edf = b*(T/tau) - c
 
@@ -87,6 +113,7 @@ so `totvar_edof` requires that value to be passed rather than guessing it.
 
 At the longest tau of a 4096-point record this is under a hundredth of the
 term count — the gap between what TOTVAR *reports* and what it *knows*.
+`eta1` finds the same number without being told the noise type.
 
 ## Validation status
 
@@ -104,6 +131,8 @@ term count — the gap between what TOTVAR *reports* and what it *knows*.
   project plan flagged as non-trivial for reflection code, and a one-sided
   or off-by-one reflection breaks it and almost nothing else;
 * the drift bias, asserted in both directions;
+* **`eta1` against `2*sigma^4/Var(sigma_hat^2)` over 400 realizations**,
+  the measurement that reversed the claim above;
 * **the published `a` coefficients against measured bias**: synthetic
   flicker FM and random-walk FM, 120 realizations at N=4096, TOTVAR/AVAR
   against `1 - a*tau/T` to 0.02 out to `tau = T/16`, and the correction

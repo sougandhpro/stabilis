@@ -44,7 +44,9 @@ __all__ = [
 # shares none of this module's inputs. It is listed here because this tuple
 # is the single source of truth for what a caller -- and the CLI -- may ask
 # for. `auto` deliberately never resolves to it; see the module docstring.
-EDOF_METHODS = ("auto", "eta1", "eta3", "greenhall")
+# "totvar" and "greenhall" both assume a power law; neither is ever
+# chosen by "auto", because staying noise-type-free is the point.
+EDOF_METHODS = ("auto", "eta1", "eta3", "greenhall", "totvar")
 DATA_DRIVEN_METHODS = ("auto", "eta1", "eta3")
 
 # Below this many terms the sample autocorrelation is mostly noise and eta1
@@ -173,6 +175,13 @@ def edof(
     has to be able to answer for, so the caller records it rather than
     discovering it later.
     """
+    if method == "totvar":
+        raise ValueError(
+            "edof: 'totvar' is not a coefficient-based estimator; it needs "
+            "the noise type, the tau and the record length. Call "
+            "stats.edof.totvar_edof, or stats.ci.confidence with "
+            "method='totvar'"
+        )
     if method == "greenhall":
         raise ValueError(
             "edof: 'greenhall' is not a coefficient-based estimator; it needs "
