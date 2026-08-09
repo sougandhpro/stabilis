@@ -46,7 +46,8 @@ DEFAULT_PORT = 8765
 # unrelated files.
 DATA_SUFFIXES = (".dat", ".txt", ".csv", ".tsv", ".npy", ".phase", ".freq", "")
 
-ESTIMATORS = ("oadev", "adev", "mdev", "tdev", "ohdev", "mtie", "tierms")
+ESTIMATORS = ("oadev", "adev", "mdev", "tdev", "ohdev", "totdev",
+              "mtie", "tierms")
 
 # What the numbers in the file are in, and the factor that turns them into
 # what the library wants. Phase is seconds; fractional frequency is

@@ -38,7 +38,9 @@ import math
 
 import numpy as np
 
-__all__ = ["deviation_bias_factor", "unbias_deviation"]
+__all__ = [
+    "totvar_bias",
+    "TOTVAR_BIAS_A","deviation_bias_factor", "unbias_deviation"]
 
 
 def deviation_bias_factor(eta):
@@ -87,3 +89,47 @@ def unbias_deviation(dev, eta):
     the data to be reported, and this is pretreatment of the result.
     """
     return np.asarray(dev, dtype=np.float64) / deviation_bias_factor(eta)
+
+
+# TOTVAR is biased low for the steeper FM noises. NIST SP 1065 section
+# 5.2.11: "Bias corrections of the form 1/[1-a(tau/T)], where T is the
+# record length, need to be applied for flicker and random walk FM noise,
+# where a = 0.481 and 0.750, respectively." Its expected value equals
+# AVAR's for white and flicker PM and for white FM, so those are zero --
+# recorded explicitly rather than left to a missing key.
+TOTVAR_BIAS_A = {2: 0.0, 1: 0.0, 0: 0.0, -1: 0.481, -2: 0.750}
+
+
+def totvar_bias(alpha: int, tau_s, record_s: float) -> np.ndarray:
+    """Multiplier turning TOTVAR into an unbiased estimate of AVAR.
+
+        corrected = totvar / (1 - a * tau / T)
+
+    `a` depends on the noise type, which is why TOTVAR is coupled to noise
+    identification in a way the classical estimators are not. Returned as a
+    factor rather than applied, so a caller can see and record what was
+    done to their number.
+
+    The correction grows without bound as `tau` approaches `T/a`, so it is
+    refused past the point where it would exceed a factor of two: beyond
+    there the "correction" is larger than the thing being corrected, and a
+    number produced that way is not a measurement.
+    """
+    if alpha not in TOTVAR_BIAS_A:
+        raise ValueError(
+            f"totvar_bias: no published coefficient for alpha={alpha}; "
+            f"SP 1065 gives {sorted(TOTVAR_BIAS_A)}")
+    a = TOTVAR_BIAS_A[alpha]
+    tau = np.asarray(tau_s, dtype=np.float64)
+    if record_s <= 0.0:
+        raise ValueError(f"record length must be positive, got {record_s}")
+    denominator = 1.0 - a * tau / record_s
+    if np.any(denominator < 0.5):
+        worst = float(np.asarray(tau).ravel()[np.argmin(denominator)])
+        raise ValueError(
+            f"totvar_bias: at tau={worst:g} s of a {record_s:g} s record the "
+            f"correction for alpha={alpha} exceeds a factor of two. Past that "
+            "the correction is bigger than the quantity being corrected; drop "
+            "the long-tau points instead."
+        )
+    return 1.0 / denominator

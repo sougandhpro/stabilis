@@ -29,6 +29,8 @@ from __future__ import annotations
 import numpy as np
 
 __all__ = [
+    "totvar_edof",
+    "TOTVAR_EDOF_BC",
     "eta1",
     "eta3",
     "edof",
@@ -190,3 +192,45 @@ def edof(
     if n_terms < MIN_TERMS_FOR_ETA1:
         return eta3(n_terms, m, span_factor), "eta3"
     return eta1(coeffs, m, lag_limit), "eta1"
+
+
+# TOTVAR's own degrees of freedom. NIST SP 1065 section 5.2.11: "The number
+# of equivalent chi^2 degrees of freedom for TOTVAR can be estimated for
+# white FM, flicker FM and random walk FM noise by the expression
+# b(T/tau)-c, where b = 1.500, 1.168 and 0.927, and c = 0, 0.222 and 0.358,
+# respectively."
+TOTVAR_EDOF_BC = {0: (1.500, 0.0), -1: (1.168, 0.222), -2: (0.927, 0.358)}
+
+
+def totvar_edof(alpha: int, tau_s: float, record_s: float,
+                overlapping_edof: float | None = None) -> float:
+    """Equivalent chi-square degrees of freedom for a TOTVAR estimate.
+
+        edf = b*(T/tau) - c
+
+    **This is not optional dressing.** TOTVAR keeps `N-2` terms at every
+    tau by reusing reflected data, so the coefficient array stays long even
+    where the real information has run out. A data-driven estimator handed
+    those coefficients sees many terms and reports a confidence far better
+    than the record can support. The published formula counts what is
+    actually there.
+
+    For white and flicker PM, SP 1065 says the edf equals the overlapping
+    ADEV's "with the number of chi-square degrees of freedom increased by
+    2" -- so that case needs the Allan edf passed in rather than derived
+    here.
+    """
+    if alpha in (2, 1):
+        if overlapping_edof is None:
+            raise ValueError(
+                f"totvar_edof: alpha={alpha} is defined against the "
+                "overlapping ADEV's edf plus two, so pass overlapping_edof=")
+        return float(overlapping_edof) + 2.0
+    if alpha not in TOTVAR_EDOF_BC:
+        raise ValueError(
+            f"totvar_edof: no published coefficients for alpha={alpha}; "
+            f"SP 1065 gives {sorted(TOTVAR_EDOF_BC)} plus 2 and 1")
+    if tau_s <= 0.0 or record_s <= 0.0:
+        raise ValueError("tau and record length must be positive")
+    b, c = TOTVAR_EDOF_BC[alpha]
+    return max(1.0, b * (record_s / tau_s) - c)

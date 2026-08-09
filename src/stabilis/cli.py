@@ -74,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats.add_argument("--json", action="store_true", help="emit JSON")
     p_stats.set_defaults(func=_cmd_stats)
 
-    from .stats import adev, mdev, mtie, oadev, ohdev, tdev, tierms
+    from .stats import adev, mdev, mtie, oadev, ohdev, tdev, tierms, totdev
 
     # MTIE and TIE rms take no confidence arguments: they are not variances,
     # so the chi-square interval does not apply and `confidence` refuses
@@ -86,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("mdev", mdev),
         ("tdev", tdev),
         ("ohdev", ohdev),
+        ("totdev", totdev),
         ("mtie", mtie),
         ("tierms", tierms),
     ):
@@ -147,7 +148,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_input_args(p_cmp)
     p_cmp.add_argument(
-        "--estimator", default="oadev", choices=("adev", "oadev", "mdev", "tdev", "ohdev")
+        "--estimator", default="oadev",
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "totdev")
     )
     p_cmp.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
     p_cmp.add_argument("--max-af", type=int, help="largest averaging factor")
@@ -195,7 +197,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_plot.add_argument(
         "--estimator", default="oadev",
-        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "mtie", "tierms"),
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "totdev", "mtie",
+                 "tierms"),
     )
     p_plot.add_argument("--taus", default="octave", choices=MODES)
     p_plot.add_argument("--max-af", type=int, help="largest averaging factor")
@@ -244,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_solve.add_argument("path", help="bench.json")
     p_solve.add_argument(
         "--estimator", default="oadev",
-        choices=("adev", "oadev", "mdev", "tdev", "ohdev"),
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "totdev"),
     )
     p_solve.add_argument("--taus", default="octave", choices=MODES)
     p_solve.add_argument("--max-af", type=int, help="largest averaging factor")
