@@ -35,7 +35,7 @@ from stabilis.reference import (
     nbs14_9point,
 )
 from stabilis.stats import adev, mdev, oadev, ohdev, tdev
-from stabilis.multi import cross_variance
+from stabilis.multi import cross_matrix, cross_variance, reject
 from stabilis.synth import (power_law_freq, power_law_noise,
                             power_law_phase)
 from stabilis.types import FreqSeries, PhaseSeries, to_frequency, to_phase
@@ -345,6 +345,52 @@ def measure_cross_rejection():
     ]
 
 
+REJECT_TRIALS = 40
+
+
+def measure_rejection_gain():
+    """What a third and fourth channel are worth, in decibels.
+
+    The commercial question, so it is measured rather than quoted. Averaging
+    P = M(M-1)/2 pairs would win `5 log10 P` if the pairs were independent.
+    They are not -- (c0,c1) and (c0,c2) share a channel -- so the naive
+    figure is an upper bound and the exact Isserlis covariance over pairs of
+    pairs says how much is real.
+
+    Reported against the two-channel measurement on the *same* records, so
+    the comparison is paired and the clock realization cancels out of it.
+    """
+    rng = np.random.default_rng(20260810)
+    n, rate = 8192, 1.0
+    rows = {2: [], 3: [], 4: []}
+    for _ in range(REJECT_TRIALS):
+        clock = power_law_phase(n, 0, rate, rng, 1.0e-24)
+        ch = {
+            f"c{i}": PhaseSeries(
+                x=clock.x + power_law_phase(n, 2, rate, rng, 1.0e-22).x,
+                rate_hz=rate)
+            for i in range(4)
+        }
+        for m_ch in rows:
+            subset = {k: ch[k] for k in list(ch)[:m_ch]}
+            r = reject(cross_matrix(subset, max_af=64))
+            rows[m_ch].append(r.rejection_db)
+        af, tau = r.af, r.tau_s
+    base = np.array(rows[2]).mean(axis=0)
+    return [
+        {
+            "tau": float(tau[i]),
+            "af": int(af[i]),
+            "base": float(base[i]),
+            "gain3": float(np.array(rows[3]).mean(axis=0)[i] - base[i]),
+            "gain4": float(np.array(rows[4]).mean(axis=0)[i] - base[i]),
+            "naive3": 5.0 * np.log10(3.0),
+            "naive4": 5.0 * np.log10(6.0),
+        }
+        for i in range(af.size)
+    ]
+
+
 def measure_generator():
     """The NBS14 recursion against its published check values."""
     ints = nbs14_1000point_integers(3)
@@ -465,6 +511,7 @@ def build_html():
     gen = measure_generator()
     gaps = measure_gap_handling()
     crossing = measure_cross_rejection()
+    gains = measure_rejection_gain()
     tests = run_tests()
     git = git_state()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -478,9 +525,9 @@ complete — the v0.1 line, the first version from which an uncertainty may
 legitimately be quoted — and most of M3: Greenhall EDOF, which is error-bar
 parity with Stable32; the exact non-negative least squares core and the
 power-law decomposition built on it; TOTVAR, the Thêo family and the MODWT
-wavelet variance. Two pieces of M5 are built ahead of their milestone, being
-the parts with no equivalent in any other tool: the bench model, and the
-cross-variance.</p>
+wavelet variance. M5 is complete ahead of its place in the sequence, being
+the part with no equivalent in any other tool: the bench model, the
+cross-variance, and multi-channel noise rejection.</p>
 <div class="meta">
 generated {esc(now)} &nbsp;·&nbsp; stabilis {esc(stabilis.__version__)} &nbsp;·&nbsp;
 numpy {esc(np.__version__)} &nbsp;·&nbsp; python {esc(platform.python_version())}<br>
@@ -787,13 +834,59 @@ the unconditional one does not — so the reported bar is conservative for that
 question, correctly, since nothing in one measurement can tell it which
 question was being asked. Against the quantity it does claim — the scatter of
 the estimate about the truth — it is measured at ±20% out to m = N/4 in
-<code>tests/test_cross.py</code>. The obvious alternative — a Bartlett sum over the
-products' own autocovariance, assuming no distribution at all — was built first
-and measures 0.89 / 0.73 / 0.56 / 0.37 / 0.30 of that scatter from m = N/64 to
-N/4. The products are heavy-tailed where the coefficients are Gaussian, so each
-extra lag of their sample autocovariance adds more noise than signal. Both
-estimators are kept in the test suite and measured on the same realizations, so
-the reason for the choice stays a live number.</p></div>"""
+<code>tests/test_cross.py</code>.</p>
+<p><strong>Two estimators were rejected on measurement before this one, and
+they fail in different places.</strong> A Bartlett sum over the products' own
+autocovariance, assuming no distribution at all, decays monotonically to
+0.30 of the true scatter at long τ — the products are heavy-tailed where the
+coefficients are Gaussian, so each extra lag of their sample autocovariance
+adds more noise than signal. The equal-shape closed form, which collapses the
+three correlation functions onto one shape and is what the library shipped
+first, is fine at both ends of the τ range and 15% narrow in the middle: at
+short τ the instrument sets all three shapes and at long τ the clock does, so
+the approximation is exact in both limits and wrong exactly where they mix.
+The form now used sums all four lagged covariances and approximates nothing;
+it costs no new numerics, since the cross-correlation of two coefficient
+arrays comes out of the FFT the EDOF machinery already runs. All three are
+kept in the test suite and measured on the same realizations, so the reason
+for the choice stays a live number.</p></div>"""
+    )
+
+    parts.append(
+        """<p><strong>More channels reject deeper, and by less than counting
+the pairs would suggest.</strong> Each of the P = M(M−1)/2 pairs is an
+unbiased estimate of the same clock, so averaging them helps — but (c0,c1) and
+(c0,c2) share a channel, so they are not independent estimates and the naive
+<code>5·log₁₀(P)</code> is an upper bound rather than the answer. Measured at
+generation time over TRIALS realizations, as the gain over the two-channel
+measurement on the same records:</p>""".replace("TRIALS", str(REJECT_TRIALS))
+    )
+    parts.append(
+        table(
+            ["τ (s)", "2 channels", "3 channels", "naive", "4 channels", "naive"],
+            [
+                (
+                    f"{r['tau']:g}",
+                    f"{r['base']:.1f} dB",
+                    f"+{r['gain3']:.2f} dB",
+                    f"+{r['naive3']:.2f}",
+                    f"+{r['gain4']:.2f} dB",
+                    f"+{r['naive4']:.2f}",
+                )
+                for r in gains
+            ],
+            numeric=(0, 1, 2, 3, 4, 5),
+        )
+    )
+    parts.append(
+        """<div class="note">The gain is real at short τ and vanishes at long
+τ, and both halves are correct. Where the instruments dominate there is noise
+to reject and the extra pairs reject it; by the time the clock dominates there
+is nothing left to remove, and a fourth channel buys nothing whatever. A tool
+that reported the naive figure would promise a constant 3.9 dB across the
+whole curve and be wrong at both ends of it — overselling the hardware at long
+τ, and overstating the confidence at short τ, which is the more expensive
+mistake.</div>"""
     )
 
     parts.append("<h2>Design decisions worth recording</h2>")
@@ -921,7 +1014,7 @@ non-interactive script, because an exclusion that exists only as a mouse
 gesture is not evidence. The fourth stage is the bench, which is the only one
 that reads several files at once and therefore the one that assumes least
 about them.</li>
-<li><strong>M5's two differentiators, built ahead of their milestone.</strong>
+<li><strong>M5 complete, ahead of its place in the sequence.</strong>
 The <strong>bench model</strong> describes the actual experiment as sources,
 devices and channels, and turns three-cornered hat, N-cornered hat and
 instrument noise-floor subtraction into one non-negative linear solve per τ
@@ -949,8 +1042,12 @@ of products being unbounded below; Isserlis' theorem gives
 (auto_a·auto_b + cross²)/η instead, which is 2σ⁴/η when the two channels are
 the same channel — so <code>cross_variance(a, a)</code> returns the
 auto-variance bit for bit and the two error bars are one construction rather
-than two. Negative variances are reported signed rather than clipped in both,
-because they are the method telling you an independence assumption failed.</li>
+than two. <code>cross_matrix</code> does every pair at once and
+<code>reject</code> averages them, which reaches deeper still; the pairs share
+channels and are therefore not independent, and the exact covariance says how
+much of the naive gain is real. Negative variances are reported signed rather
+than clipped throughout, because they are the method telling you an
+independence assumption failed.</li>
 <li><strong>The measurement report</strong>, which is the actual paid
 deliverable and now exists: one self-contained HTML document per measurement,
 carrying the σ(τ) table with its intervals, the noise type at each τ, the
@@ -982,10 +1079,8 @@ generated by the tool under test.</li>
 vendor exports rather than on effort: a binary format with no public
 specification can only be accepted if the same capture is also available as
 vendor ASCII to check the reader against. Then model fitting against the χ²
-likelihood, the rest of <code>multi/</code> — the N-channel sweep and the
-software rejection of a multi-channel capture, the alignment and the pairwise
-estimator being done — realtime ingest with attributed time tagging, and
-dynamic Allan variance.</li>
+likelihood, realtime ingest with attributed time tagging, and dynamic Allan
+variance.</li>
 </ul>
 
 <div class="note"><strong>Known limitations.</strong> Confidence intervals now

@@ -39,13 +39,13 @@ complete — the v0.1 line, the first version from which an uncertainty may
 legitimately be quoted — and most of M3: Greenhall EDOF, which is error-bar
 parity with Stable32; the exact non-negative least squares core and the
 power-law decomposition built on it; TOTVAR, the Thêo family and the MODWT
-wavelet variance. Two pieces of M5 are built ahead of their milestone, being
-the parts with no equivalent in any other tool: the bench model, and the
-cross-variance.</p>
+wavelet variance. M5 is complete ahead of its place in the sequence, being
+the part with no equivalent in any other tool: the bench model, the
+cross-variance, and multi-channel noise rejection.</p>
 <div class="meta">
-generated 2026-08-09 18:52 UTC &nbsp;·&nbsp; stabilis 0.0.1.dev0 &nbsp;·&nbsp;
+generated 2026-08-09 21:09 UTC &nbsp;·&nbsp; stabilis 0.0.1.dev0 &nbsp;·&nbsp;
 numpy 2.2.6 &nbsp;·&nbsp; python 3.10.12<br>
-commit 457249f (45 total) — WORKING TREE DIRTY
+commit de118cb (47 total) — WORKING TREE DIRTY
  &nbsp;·&nbsp; every figure below is measured at generation time
 </div>
 <h2>What this is</h2>
@@ -193,7 +193,7 @@ to <em>the clock record's own</em> σ²(τ) — not a closed form and not a fit 
 the table is the rejection itself rather than a consistency check. A ratio of
 1.00 is the right answer; the auto column is what a single channel would have
 told you.</p>
-<table><thead><tr><th class="n">τ (s)</th><th class="n">auto / truth</th><th class="n">cross / truth</th><th class="n">ensemble spread</th><th class="n">reported ± </th><th class="n">rejection</th></tr></thead><tbody><tr><td class="n">1</td><td class="n">8.64×</td><td class="n">1.014×</td><td class="n">12.1%</td><td class="n">13.1%</td><td class="n">18.2 dB</td></tr><tr><td class="n">2</td><td class="n">4.81×</td><td class="n">1.015×</td><td class="n">6.9%</td><td class="n">7.4%</td><td class="n">18.1 dB</td></tr><tr><td class="n">4</td><td class="n">2.91×</td><td class="n">1.004×</td><td class="n">4.0%</td><td class="n">4.7%</td><td class="n">17.9 dB</td></tr><tr><td class="n">8</td><td class="n">1.96×</td><td class="n">1.004×</td><td class="n">2.4%</td><td class="n">4.0%</td><td class="n">16.9 dB</td></tr><tr><td class="n">16</td><td class="n">1.48×</td><td class="n">1.001×</td><td class="n">1.6%</td><td class="n">4.8%</td><td class="n">14.9 dB</td></tr><tr><td class="n">32</td><td class="n">1.24×</td><td class="n">1.001×</td><td class="n">1.1%</td><td class="n">6.8%</td><td class="n">12.6 dB</td></tr><tr><td class="n">64</td><td class="n">1.12×</td><td class="n">1.001×</td><td class="n">0.8%</td><td class="n">9.9%</td><td class="n">10.5 dB</td></tr></tbody></table>
+<table><thead><tr><th class="n">τ (s)</th><th class="n">auto / truth</th><th class="n">cross / truth</th><th class="n">ensemble spread</th><th class="n">reported ± </th><th class="n">rejection</th></tr></thead><tbody><tr><td class="n">1</td><td class="n">8.64×</td><td class="n">1.014×</td><td class="n">12.1%</td><td class="n">13.1%</td><td class="n">18.2 dB</td></tr><tr><td class="n">2</td><td class="n">4.81×</td><td class="n">1.015×</td><td class="n">6.9%</td><td class="n">7.4%</td><td class="n">18.1 dB</td></tr><tr><td class="n">4</td><td class="n">2.91×</td><td class="n">1.004×</td><td class="n">4.0%</td><td class="n">4.8%</td><td class="n">17.8 dB</td></tr><tr><td class="n">8</td><td class="n">1.96×</td><td class="n">1.004×</td><td class="n">2.4%</td><td class="n">4.4%</td><td class="n">16.5 dB</td></tr><tr><td class="n">16</td><td class="n">1.48×</td><td class="n">1.001×</td><td class="n">1.6%</td><td class="n">5.4%</td><td class="n">14.4 dB</td></tr><tr><td class="n">32</td><td class="n">1.24×</td><td class="n">1.001×</td><td class="n">1.1%</td><td class="n">7.4%</td><td class="n">12.3 dB</td></tr><tr><td class="n">64</td><td class="n">1.12×</td><td class="n">1.001×</td><td class="n">0.8%</td><td class="n">10.4%</td><td class="n">10.3 dB</td></tr></tbody></table>
 <div class="note"><strong>At τ = 1 s the single-channel answer is
 several times the clock it was meant to measure, and the cross estimate is
 within a percent of it.</strong> The two converge at long τ, and that is
@@ -229,13 +229,38 @@ the unconditional one does not — so the reported bar is conservative for that
 question, correctly, since nothing in one measurement can tell it which
 question was being asked. Against the quantity it does claim — the scatter of
 the estimate about the truth — it is measured at ±20% out to m = N/4 in
-<code>tests/test_cross.py</code>. The obvious alternative — a Bartlett sum over the
-products' own autocovariance, assuming no distribution at all — was built first
-and measures 0.89 / 0.73 / 0.56 / 0.37 / 0.30 of that scatter from m = N/64 to
-N/4. The products are heavy-tailed where the coefficients are Gaussian, so each
-extra lag of their sample autocovariance adds more noise than signal. Both
-estimators are kept in the test suite and measured on the same realizations, so
-the reason for the choice stays a live number.</p></div>
+<code>tests/test_cross.py</code>.</p>
+<p><strong>Two estimators were rejected on measurement before this one, and
+they fail in different places.</strong> A Bartlett sum over the products' own
+autocovariance, assuming no distribution at all, decays monotonically to
+0.30 of the true scatter at long τ — the products are heavy-tailed where the
+coefficients are Gaussian, so each extra lag of their sample autocovariance
+adds more noise than signal. The equal-shape closed form, which collapses the
+three correlation functions onto one shape and is what the library shipped
+first, is fine at both ends of the τ range and 15% narrow in the middle: at
+short τ the instrument sets all three shapes and at long τ the clock does, so
+the approximation is exact in both limits and wrong exactly where they mix.
+The form now used sums all four lagged covariances and approximates nothing;
+it costs no new numerics, since the cross-correlation of two coefficient
+arrays comes out of the FFT the EDOF machinery already runs. All three are
+kept in the test suite and measured on the same realizations, so the reason
+for the choice stays a live number.</p></div>
+<p><strong>More channels reject deeper, and by less than counting
+the pairs would suggest.</strong> Each of the P = M(M−1)/2 pairs is an
+unbiased estimate of the same clock, so averaging them helps — but (c0,c1) and
+(c0,c2) share a channel, so they are not independent estimates and the naive
+<code>5·log₁₀(P)</code> is an upper bound rather than the answer. Measured at
+generation time over 40 realizations, as the gain over the two-channel
+measurement on the same records:</p>
+<table><thead><tr><th class="n">τ (s)</th><th class="n">2 channels</th><th class="n">3 channels</th><th class="n">naive</th><th class="n">4 channels</th><th class="n">naive</th></tr></thead><tbody><tr><td class="n">1</td><td class="n">18.2 dB</td><td class="n">+1.95 dB</td><td class="n">+2.39</td><td class="n">+3.06 dB</td><td class="n">+3.89</td></tr><tr><td class="n">2</td><td class="n">18.1 dB</td><td class="n">+1.60 dB</td><td class="n">+2.39</td><td class="n">+2.44 dB</td><td class="n">+3.89</td></tr><tr><td class="n">4</td><td class="n">17.8 dB</td><td class="n">+0.95 dB</td><td class="n">+2.39</td><td class="n">+1.39 dB</td><td class="n">+3.89</td></tr><tr><td class="n">8</td><td class="n">16.5 dB</td><td class="n">+0.32 dB</td><td class="n">+2.39</td><td class="n">+0.46 dB</td><td class="n">+3.89</td></tr><tr><td class="n">16</td><td class="n">14.4 dB</td><td class="n">+0.08 dB</td><td class="n">+2.39</td><td class="n">+0.11 dB</td><td class="n">+3.89</td></tr><tr><td class="n">32</td><td class="n">12.3 dB</td><td class="n">+0.02 dB</td><td class="n">+2.39</td><td class="n">+0.03 dB</td><td class="n">+3.89</td></tr><tr><td class="n">64</td><td class="n">10.3 dB</td><td class="n">+0.00 dB</td><td class="n">+2.39</td><td class="n">+0.00 dB</td><td class="n">+3.89</td></tr></tbody></table>
+<div class="note">The gain is real at short τ and vanishes at long
+τ, and both halves are correct. Where the instruments dominate there is noise
+to reject and the extra pairs reject it; by the time the clock dominates there
+is nothing left to remove, and a fourth channel buys nothing whatever. A tool
+that reported the naive figure would promise a constant 3.9 dB across the
+whole curve and be wrong at both ends of it — overselling the hardware at long
+τ, and overstating the confidence at short τ, which is the more expensive
+mistake.</div>
 <h2>Design decisions worth recording</h2>
 
 <h3>Scale factors live outside the coefficients</h3>
@@ -268,9 +293,9 @@ arbitrary code execution. <code>.npy</code> covers the same need safely.</p>
 <h2>Current state</h2>
 
 <div class="kv">
-  <dt>test suite</dt><dd class="mono">947 passed in 261.87s (0:04:21) &nbsp; <span class="ok">PASS</span></dd>
-  <dt>wall time</dt><dd class="mono">271.0 s</dd>
-  <dt>latest commit</dt><dd class="mono">457249f — Multiply two channels&#x27; coefficients, and see under the instrument</dd>
+  <dt>test suite</dt><dd class="mono">972 passed in 280.61s (0:04:40) &nbsp; <span class="ok">PASS</span></dd>
+  <dt>wall time</dt><dd class="mono">292.8 s</dd>
+  <dt>latest commit</dt><dd class="mono">de118cb — Close M5: average every pair, and make the error bar exact</dd>
 </div>
 <p>Three structural properties are enforced by tests rather than convention: the
 core computes with scipy and matplotlib absent; every theory page must declare
@@ -356,7 +381,7 @@ non-interactive script, because an exclusion that exists only as a mouse
 gesture is not evidence. The fourth stage is the bench, which is the only one
 that reads several files at once and therefore the one that assumes least
 about them.</li>
-<li><strong>M5's two differentiators, built ahead of their milestone.</strong>
+<li><strong>M5 complete, ahead of its place in the sequence.</strong>
 The <strong>bench model</strong> describes the actual experiment as sources,
 devices and channels, and turns three-cornered hat, N-cornered hat and
 instrument noise-floor subtraction into one non-negative linear solve per τ
@@ -384,8 +409,12 @@ of products being unbounded below; Isserlis' theorem gives
 (auto_a·auto_b + cross²)/η instead, which is 2σ⁴/η when the two channels are
 the same channel — so <code>cross_variance(a, a)</code> returns the
 auto-variance bit for bit and the two error bars are one construction rather
-than two. Negative variances are reported signed rather than clipped in both,
-because they are the method telling you an independence assumption failed.</li>
+than two. <code>cross_matrix</code> does every pair at once and
+<code>reject</code> averages them, which reaches deeper still; the pairs share
+channels and are therefore not independent, and the exact covariance says how
+much of the naive gain is real. Negative variances are reported signed rather
+than clipped throughout, because they are the method telling you an
+independence assumption failed.</li>
 <li><strong>The measurement report</strong>, which is the actual paid
 deliverable and now exists: one self-contained HTML document per measurement,
 carrying the σ(τ) table with its intervals, the noise type at each τ, the
@@ -417,10 +446,8 @@ generated by the tool under test.</li>
 vendor exports rather than on effort: a binary format with no public
 specification can only be accepted if the same capture is also available as
 vendor ASCII to check the reader against. Then model fitting against the χ²
-likelihood, the rest of <code>multi/</code> — the N-channel sweep and the
-software rejection of a multi-channel capture, the alignment and the pairwise
-estimator being done — realtime ingest with attributed time tagging, and
-dynamic Allan variance.</li>
+likelihood, realtime ingest with attributed time tagging, and dynamic Allan
+variance.</li>
 </ul>
 
 <div class="note"><strong>Known limitations.</strong> Confidence intervals now
