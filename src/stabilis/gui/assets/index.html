@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stabilis</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<aside id="side">
+  <h1>stabilis</h1>
+
+  <label for="dirpath">folder</label>
+  <div class="row">
+    <input id="dirpath" placeholder="subfolder, or blank for the root">
+    <button id="godir" class="inline">Go</button>
+  </div>
+  <p id="root" class="tiny muted"></p>
+  <div id="files"></div>
+  <p id="filefacts" class="tiny"></p>
+  <p id="err" class="err"></p>
+</aside>
+
+<main>
+  <nav id="stages">
+    <button data-stage="1" class="on">1 &middot; Data</button>
+    <button data-stage="2">2 &middot; Prepare</button>
+    <button data-stage="3">3 &middot; Analyse</button>
+  </nav>
+
+  <!-- ------------------------------------------------ stage 1: the record -->
+  <section id="stage1" class="stage on">
+    <div class="split">
+      <div class="panel">
+        <h2>columns</h2>
+        <p id="headernote" class="tiny muted"></p>
+        <table id="collist"></table>
+        <p class="tiny muted">Tick a column to draw it. Names are yours to
+          change &mdash; whatever you type here is what the expressions in
+          stage&nbsp;2 refer to.</p>
+      </div>
+      <div class="panel grow">
+        <h2>the record <span id="rawinfo" class="tiny muted"></span></h2>
+        <div class="plotbox"><canvas id="rawplot"></canvas></div>
+        <p class="tiny muted">Drag to keep a stretch. Drag again to keep
+          another. Shift-drag pans, the wheel zooms, double-click fits.
+          Zooming asks the server for finer detail over the visible span
+          &mdash; it is not a magnified picture.</p>
+        <div id="windows"></div>
+        <button id="clearwindows" class="inline ghost">clear every window</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------- stage 2: what it means -->
+  <section id="stage2" class="stage">
+    <div class="split">
+      <div class="panel">
+        <h2>what the numbers are</h2>
+        <div class="row">
+          <div><label for="data_kind">read as</label>
+            <select id="data_kind">
+              <option value="phase">phase</option>
+              <option value="frequency">frequency</option>
+            </select></div>
+          <div><label for="unit">units in the file</label>
+            <select id="unit"></select></div>
+        </div>
+        <div class="row">
+          <div><label for="rate">rate (Hz)</label>
+            <input id="rate" placeholder="blank = from time column"></div>
+          <div><label for="time_column">time column</label>
+            <select id="time_column"></select></div>
+        </div>
+        <label for="time_format">what the timestamps are</label>
+        <select id="time_format">
+          <option value="">work it out from the values</option>
+          <option value="elapsed">elapsed seconds</option>
+          <option value="unix">Unix seconds</option>
+          <option value="mjd">MJD (days)</option>
+          <option value="iso">ISO-8601 text</option>
+        </select>
+        <p id="ratenote" class="tiny muted"></p>
+
+        <h2>cleanup</h2>
+        <label for="outlier">outlier threshold (MAD sigmas)</label>
+        <input id="outlier" placeholder="blank = keep every point">
+        <label for="reason">reason for the edits (goes in the record)</label>
+        <input id="reason" placeholder="e.g. after warm-up, cable touched 14:05">
+        <div class="chk"><input type="checkbox" id="join">
+          <label for="join">join the windows into one gapped record</label></div>
+        <p class="tiny muted">Off, each window is analysed as its own record
+          and drawn as its own curve. On, they become one record with the
+          stretches between them marked as gaps. Nothing is interpolated
+          either way.</p>
+      </div>
+
+      <div class="panel grow">
+        <h2>series</h2>
+        <p class="tiny muted">Each series is an arithmetic expression over the
+          columns: <code>NCS - VSL</code>, <code>-VSL</code>,
+          <code>(A - B) / 5</code>, <code>#2 * 1e9</code>. Click a name to
+          insert it.</p>
+        <p id="chips" class="tiny"></p>
+        <table id="serieslist"></table>
+        <div class="row">
+          <button id="addseries" class="inline">+ series</button>
+        </div>
+        <div class="plotbox"><canvas id="prepplot"></canvas></div>
+        <p id="prepinfo" class="tiny muted"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------- stage 3: answers -->
+  <section id="stage3" class="stage">
+    <div class="panel">
+      <div class="row wrap">
+        <div><label for="estimator">estimator</label>
+          <select id="estimator"></select></div>
+        <div><label for="taus">tau grid</label>
+          <select id="taus">
+            <option>octave</option><option>decade</option>
+            <option>all</option><option>log</option>
+          </select></div>
+        <div><label for="max_af">max averaging factor</label>
+          <input id="max_af" placeholder="auto"></div>
+        <div><label for="level">confidence level</label>
+          <select id="level">
+            <option value="0.6827">1 sigma (68.27%)</option>
+            <option value="0.9545">2 sigma (95.45%)</option>
+            <option value="0.95">95%</option>
+          </select></div>
+      </div>
+      <div class="row wrap">
+        <div class="chk"><input type="checkbox" id="wantci" checked>
+          <label for="wantci">confidence intervals</label></div>
+        <div class="chk"><input type="checkbox" id="together" checked>
+          <label for="together">all series on one axis</label></div>
+        <button id="go">Analyse</button>
+      </div>
+      <p id="suggestion" class="tiny muted"></p>
+    </div>
+    <div id="results"></div>
+  </section>
+</main>
+
+<script src="plot.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -47,7 +47,7 @@ Source = "https://github.com/sougandhkm/stabilis"
 where = ["src"]
 
 [tool.setuptools.package-data]
-stabilis = ["theory/*.md"]
+stabilis = ["theory/*.md", "gui/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

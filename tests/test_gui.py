@@ -1,16 +1,23 @@
-"""The local GUI server.
+"""The local GUI: routing, the path guard, and the data path behind it.
 
-Tested through real HTTP against a real server on a free port, because the
-handler's job *is* the HTTP behaviour -- calling the functions directly
-would skip routing, JSON encoding and error mapping, which is most of what
-could break.
+Tested through real HTTP against a real server on a free port wherever the
+handler is involved, because the handler's job *is* the HTTP behaviour --
+calling the functions directly would skip routing, JSON encoding and error
+mapping, which is most of what could break.
 
-The path-escape test is the one that matters. This serves local files to a
-browser, so `_safe` is the whole security model.
+Two groups matter more than the rest.
+
+**The path-escape tests.** This serves local files to a browser, so
+`safe_path` is the whole security model.
+
+**The expression tests.** The page has a text box that turns into
+arithmetic over a customer's file. `gui.expr` is a closed grammar with no
+evaluator behind it, and the tests throw code at it to keep it that way.
 """
 
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -18,39 +25,41 @@ from http.server import ThreadingHTTPServer
 import numpy as np
 import pytest
 
-pytest.importorskip("matplotlib")
+from stabilis.gui import Handler, cache_clear, estimators, safe_path, serve
+from stabilis.gui import expr, files, prepare
+from stabilis.gui.server import ASSETS
 
-# These tests were written against `gui.py` as a single module. It is being
-# restructured into a `gui/` package in a separate session, and the names
-# below have moved (`_Handler` -> `Handler`, `_safe` -> `safe_path`) and may
-# move again. Rather than chase a moving target from here, the module skips
-# itself when they are not importable and says so -- the GUI's own tests
-# belong with the refactor, not against a snapshot of the old shape.
-_gui = pytest.importorskip("stabilis.gui")
-for _needed in ("ESTIMATORS", "_Handler", "_safe", "serve", "_decimate",
-                "_analyze", "_preview", "PAGE"):
-    if not hasattr(_gui, _needed):
-        pytest.skip(
-            f"stabilis.gui has no {_needed!r}: the GUI is mid-refactor into a "
-            "package, and these tests target the previous module layout",
-            allow_module_level=True,
-        )
 
-from stabilis.gui import ESTIMATORS, _Handler, _safe, serve  # noqa: E402
+@pytest.fixture(autouse=True)
+def _fresh_cache():
+    """No test may see a table another test loaded."""
+    cache_clear()
+    yield
+    cache_clear()
 
 
 @pytest.fixture
-def server(tmp_path):
-    """A live server on an OS-assigned port, rooted at a temp tree."""
+def tree(tmp_path):
+    """A root with a headed CSV, a bare column, and a non-data file."""
     data = tmp_path / "sub"
     data.mkdir()
-    x = np.cumsum(np.random.default_rng(0).standard_normal(600)) * 1e-12
-    np.savetxt(data / "run.dat", x, fmt="%.15e")
-    np.savetxt(tmp_path / "top.dat", x, fmt="%.15e")
+    rng = np.random.default_rng(0)
+    a = np.cumsum(rng.standard_normal(600)) * 1e-12 + 0.35
+    b = np.cumsum(rng.standard_normal(600)) * 1e-12 + 0.35
+    with open(data / "run.csv", "w") as fh:
+        fh.write("t,NCS,VSL\n")
+        for i in range(600):
+            fh.write(f"{i},{a[i]:.15e},{b[i]:.15e}\n")
+    np.savetxt(tmp_path / "top.dat", a, fmt="%.15e")
     (tmp_path / "notes.md").write_text("not data", encoding="utf-8")
+    return tmp_path
 
-    _Handler.root = tmp_path.resolve()
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+
+@pytest.fixture
+def server(tree):
+    """A live server on an OS-assigned port, rooted at the temp tree."""
+    Handler.root = tree.resolve()
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{httpd.server_port}"
@@ -78,434 +87,590 @@ def post(base, path, payload):
         return exc.code, json.loads(exc.read())
 
 
-def test_the_page_loads_and_offers_every_estimator(server):
-    with urllib.request.urlopen(server + "/") as r:
-        page = r.read().decode()
-    assert r.status == 200
-    for name in ESTIMATORS:
-        assert name in page
-    # The page must load nothing from the network -- it is served to one
-    # local browser and a CDN reference would be a silent dependency.
-    assert "http://" not in page.replace("http://127.0.0.1", "")
-    assert "https://" not in page
+# ---------------------------------------------------------------------------
+# serving the page
+# ---------------------------------------------------------------------------
+
+def test_the_page_and_its_two_scripts_are_served(server):
+    for path, needle in [("/", "stabilis"), ("/app.js", "createPlot"),
+                         ("/plot.js", "function createPlot"),
+                         ("/app.css", "--ink")]:
+        with urllib.request.urlopen(server + path) as r:
+            assert r.status == 200
+            assert needle in r.read().decode()
 
 
-def test_listing_shows_directories_and_data_files(server):
-    status, top = get(server, "/api/files")
-    assert status == 200
-    assert top["at_root"] is True
-    assert "sub" in top["dirs"]
-    assert [f["name"] for f in top["files"]] == ["top.dat"], \
-        "notes.md is not a data file and should not clutter the picker"
+def test_the_page_asks_the_library_what_it_can_do(server):
+    """The dropdowns are filled from the engine, not from a copy in the page.
 
-    _status, inner = get(server, "/api/files?dir=sub")
-    assert inner["at_root"] is False
-    assert inner["here"] == "sub"
-    assert [f["name"] for f in inner["files"]] == ["run.dat"]
-
-
-def test_a_path_escaping_the_root_is_refused_not_rebased(server):
-    """The whole security model of a page that reads local files.
-
-    `..` is resolved *before* the check, so climbing out is refused rather
-    than silently normalized back onto the root -- the difference between
-    an error and quietly serving the wrong file.
+    A hard-coded list is how a GUI ends up quietly older than its library:
+    when this was changed, `stats/` had grown three estimators the page did
+    not offer and nothing anywhere said so.
     """
-    status, body = get(server, "/api/files?dir=../../../etc")
-    assert status == 400
-    assert "outside" in body["error"]
-
-    status, body = post(server, "/api/analyze",
-                        {"path": "../../../etc/passwd", "rate": "1.0"})
-    assert status == 400
-    assert "outside" in body["error"] or "PermissionError" in body["error"]
-
-
-def test_safe_refuses_absolute_paths_outside_the_root(tmp_path):
-    root = (tmp_path / "root")
-    root.mkdir()
-    (root / "ok.dat").write_text("1.0\n", encoding="ascii")
-    assert _safe(root, "ok.dat").name == "ok.dat"
-    with pytest.raises(PermissionError):
-        _safe(root, "/etc/passwd")
-    with pytest.raises(PermissionError):
-        _safe(root, "../outside.dat")
+    code, body = get(server, "/api/capabilities")
+    assert code == 200
+    assert set(body["estimators"]) == set(estimators())
+    assert "oadev" in body["estimators"] and len(body["estimators"]) >= 7
+    assert "octave" in body["tau_modes"]
+    assert body["units"]["phase"] == ["s", "ms", "us", "ns", "ps"]
+    with urllib.request.urlopen(server + "/app.js") as r:
+        page = r.read().decode()
+    assert "/api/capabilities" in page
 
 
-def test_analyse_returns_a_plot_and_the_numbers_behind_it(server):
-    status, body = post(server, "/api/analyze", {
-        "path": "sub/run.dat", "data_kind": "phase", "rate": "1.0",
-        "estimator": "oadev", "taus": "octave", "confidence": True,
-        "slopes": True})
-    assert status == 200, body
-    assert body["kind"] == "oadev"
-    assert body["n"] == 600
-    assert body["has_ci"] is True
-    assert len(body["png"]) > 1000
-    row = body["rows"][0]
-    assert row["af"] == 1 and row["dev"] > 0.0
-    assert row["lo"] < row["dev"] < row["hi"]
-    assert row["via"] in ("eta1", "eta3")
+@pytest.mark.parametrize("name", estimators())
+def test_every_registered_estimator_runs_through_the_page(server, name):
+    """Whatever the library registers, the page can actually run.
+
+    This is the test that catches a new estimator needing different handling
+    -- a non-variance one that takes no `keep_coeffs`, say -- at the moment
+    it is added rather than the first time someone selects it.
+    """
+    code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}],
+        "rate": 1.0, "estimator": name, "reason": "coverage"})
+    assert code == 200, body
+    assert len(body["series"][0]["rows"]["dev"]) > 0
 
 
-def test_a_non_variance_estimator_returns_no_interval_and_says_why(server):
-    """MTIE has no chi-square interval; the page must not imply one."""
-    status, body = post(server, "/api/analyze", {
-        "path": "sub/run.dat", "rate": "1.0", "estimator": "mtie",
-        "taus": "octave", "confidence": True})
-    assert status == 200, body
-    assert body["has_ci"] is False
-    assert any("not a variance" in n for n in body["notes"])
-    assert "lo" not in body["rows"][0]
+def test_the_csp_allows_the_pages_own_files_and_nothing_remote(server):
+    with urllib.request.urlopen(server + "/") as r:
+        policy = r.headers["Content-Security-Policy"]
+    # 'self' rather than 'unsafe-inline': the scripts are files on disk now,
+    # so the page needs no inline execution at all.
+    assert "script-src 'self'" in policy
+    assert "unsafe-inline" not in policy
+    # Without connect-src the page's own fetch() calls are blocked by
+    # default-src 'none' and everything renders empty, saying nothing.
+    assert "connect-src 'self'" in policy
 
 
-def test_a_bad_request_becomes_a_message_rather_than_a_traceback(server):
-    status, body = post(server, "/api/analyze",
-                        {"path": "sub/run.dat", "rate": "1.0",
-                         "estimator": "not-an-estimator"})
-    assert status == 400
-    assert "not-an-estimator" in body["error"]
-
-    status, body = post(server, "/api/analyze",
-                        {"path": "does-not-exist.dat", "rate": "1.0"})
-    assert status == 400
-    assert body["error"]
+def test_an_asset_path_cannot_climb_out_of_the_assets_directory(server):
+    for attempt in ("/../server.py", "/sub/app.js", "/..%2fserver.py"):
+        try:
+            with urllib.request.urlopen(server + attempt) as r:
+                body = r.read()
+            assert b"BaseHTTPRequestHandler" not in body, attempt
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404, attempt
 
 
 def test_unknown_routes_are_404(server):
-    for path in ("/api/nope", "/secrets"):
-        with pytest.raises(urllib.error.HTTPError) as exc:
+    for path in ("/nope", "/api/nope"):
+        with pytest.raises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(server + path)
-        assert exc.value.code == 404
+        assert caught.value.code == 404
 
 
 def test_serve_reports_a_busy_port_rather_than_crashing(tmp_path):
-    """Running it twice is a normal mistake and deserves a real message."""
-    _Handler.root = tmp_path.resolve()
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    port = httpd.server_port
+    busy = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = busy.server_port
     try:
         with pytest.raises(OSError, match="already be running"):
             serve(port=port, root=tmp_path, open_browser=False)
     finally:
+        busy.server_close()
+
+
+def test_a_bad_request_becomes_a_message_rather_than_a_traceback(server):
+    code, body = post(server, "/api/open", {"path": "does-not-exist.dat"})
+    assert code == 400
+    assert "error" in body and "Traceback" not in body["error"]
+
+
+# ---------------------------------------------------------------------------
+# the path guard -- the whole security model
+# ---------------------------------------------------------------------------
+
+def test_a_path_escaping_the_root_is_refused_not_rebased(server):
+    code, body = get(server, "/api/files?dir=..")
+    assert code == 400
+    assert "outside" in body["error"]
+
+
+def test_safe_path_refuses_absolute_paths_outside_the_root(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.dat").write_text("1\n2\n", encoding="utf-8")
+    with pytest.raises(PermissionError):
+        safe_path(root, "../secret.dat")
+    with pytest.raises(PermissionError):
+        safe_path(root, "/etc/passwd")
+    assert safe_path(root, "") == root
+
+
+def test_listing_shows_directories_and_data_files(server):
+    code, body = get(server, "/api/files?dir=")
+    assert code == 200
+    assert "sub" in body["dirs"]
+    names = [f["name"] for f in body["files"]]
+    assert "top.dat" in names and "notes.md" not in names
+
+
+# ---------------------------------------------------------------------------
+# opening a file
+# ---------------------------------------------------------------------------
+
+def test_a_header_names_the_columns_and_is_not_counted_as_a_sample(server):
+    """The reader leaves an uncommented header as a row of NaN; we do not.
+
+    `np.loadtxt` declines a file whose first line is words, so the tolerant
+    path takes it and the header arrives as a row of unreadable fields. Left
+    alone that is a phantom first sample and three phantom defects.
+    """
+    code, body = post(server, "/api/open", {"path": "sub/run.csv"})
+    assert code == 200
+    assert body["has_header"] is True
+    assert body["labels"] == ["t", "NCS", "VSL"]
+    assert body["n"] == 600, "the header line is not a data row"
+    assert body["defects"] == "", "and it is not damage either"
+
+
+def test_a_headerless_file_gets_positional_names_and_says_so(server):
+    code, body = post(server, "/api/open", {"path": "top.dat"})
+    assert code == 200
+    assert body["has_header"] is False
+    assert body["labels"] == ["column 0"]
+
+
+def test_a_ticking_column_is_offered_as_the_timebase(server):
+    _code, body = post(server, "/api/open", {"path": "sub/run.csv"})
+    assert body["time_candidates"] == [0]
+    facts = {f["label"]: f for f in body["columns"]}
+    assert facts["t"]["monotonic"] and not facts["NCS"]["monotonic"]
+    assert facts["NCS"]["n_finite"] == 600
+
+
+def test_the_file_is_read_once_and_then_reused(tree, monkeypatch):
+    """The cache is what makes the page reactive; assert it actually hits."""
+    reads = []
+    original = files._read
+    monkeypatch.setattr(files, "_read",
+                        lambda p, d: (reads.append(p), original(p, d))[1])
+    path = tree / "sub" / "run.csv"
+    first = files.load_table(path)
+    second = files.load_table(path)
+    assert len(reads) == 1
+    assert second is first
+
+
+def test_a_file_that_changed_on_disk_is_read_again(tree):
+    path = tree / "top.dat"
+    first = files.load_table(path)
+    time.sleep(0.01)
+    np.savetxt(path, np.arange(50.0), fmt="%.15e")
+    second = files.load_table(path)
+    assert second is not first and second.n == 50
+
+
+# ---------------------------------------------------------------------------
+# the timebase
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mjd_file(tmp_path):
+    """A 1 Hz record timetagged in MJD -- days, not seconds."""
+    rows = 400
+    with open(tmp_path / "mjd.csv", "w") as fh:
+        fh.write("mjd,x\n")
+        for i in range(rows):
+            fh.write(f"{60000 + i / 86400:.9f},{i * 1e-12:.15e}\n")
+    Handler.root = tmp_path.resolve()
+    return tmp_path
+
+
+def test_an_mjd_column_is_not_mistaken_for_seconds(mjd_file):
+    """The failure this guards against is a factor of 86400, silently.
+
+    MJD ticks by 1/86400 per sample at 1 Hz. Handing the column straight to
+    `infer_rate` returns 86400 Hz and every tau in the report is wrong by
+    that factor while looking entirely plausible.
+    """
+    from stabilis.io.timebase import AmbiguousTimebase
+
+    table = files.load_table(mjd_file / "mjd.csv")
+    rate, _jitter, note = files.timebase(table, 0, "mjd")
+    assert rate == pytest.approx(1.0, rel=1e-4)
+    assert "mjd" in note
+
+    # And with nothing said, it refuses rather than picking one.
+    with pytest.raises(AmbiguousTimebase):
+        files.timebase(table, 0, None)
+
+
+def test_an_ambiguous_timebase_asks_rather_than_guesses(mjd_file):
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{httpd.server_port}"
+    try:
+        code, body = post(base, "/api/analyze", {
+            "path": "mjd.csv", "series": [{"expr": "x"}], "time_column": 0,
+            "reason": "x"})
+        assert code == 400 and "Pass fmt=" in body["error"]
+
+        code, body = post(base, "/api/analyze", {
+            "path": "mjd.csv", "series": [{"expr": "x"}], "time_column": 0,
+            "time_format": "mjd", "reason": "x"})
+        assert code == 200
+        assert body["rate_hz"] == pytest.approx(1.0, rel=1e-4)
+    finally:
+        httpd.shutdown()
         httpd.server_close()
 
 
 # ---------------------------------------------------------------------------
-# The page as a browser sees it -- where two real bugs got through
+# column arithmetic -- there is no evaluator behind the box
 # ---------------------------------------------------------------------------
 
+LABELS = ("t", "NCS", "VSL")
+ROWS = np.array([[0.0, 10.0, 4.0], [1.0, 20.0, 5.0], [2.0, 30.0, np.nan]])
 
-def test_the_csp_permits_the_pages_own_fetch_calls(server):
-    """`connect-src 'self'` is load-bearing, not decoration.
 
-    Without it, `default-src 'none'` blocks every fetch the page makes and
-    the file browser renders empty with nothing saying why. The API tests
-    above use urllib, which never sees a CSP, so only this catches it.
+@pytest.mark.parametrize("attack", [
+    "__import__('os').system('ls')",
+    "open('/etc/passwd').read()",
+    "NCS.__class__",
+    "[c for c in ()]",
+    "eval('1')",
+    "NCS; import os",
+    "lambda: 1",
+    "NCS if 1 else 2",
+])
+def test_code_is_refused_rather_than_run(attack):
+    with pytest.raises(expr.ExpressionError):
+        expr.evaluate(attack, LABELS, ROWS)
+
+
+def test_an_expression_naming_no_column_is_refused():
+    """`2 - 1` is arithmetic here, not "column 2 minus column 1".
+
+    The library's `edit.parse_expression` reads a bare number as a column
+    index. This grammar has numeric literals in it, so it cannot, and
+    quietly returning the scalar 1.0 would be a wrong answer that looks
+    plausible. The error names the `#N` form that does mean a column.
     """
-    with urllib.request.urlopen(server + "/") as r:
-        csp = r.headers["Content-Security-Policy"]
-    assert "connect-src 'self'" in csp
-    assert "default-src 'none'" in csp
+    with pytest.raises(expr.ExpressionError, match="#2"):
+        expr.evaluate("2 - 1", LABELS, ROWS)
 
 
-def test_the_page_has_no_real_newline_inside_a_javascript_string():
-    """The JS lives in a Python string, and `\\n` written for JS is a trap.
-
-    In a non-raw string Python turns it into an actual newline, which lands
-    inside a JS string literal and takes the *whole script* down -- the
-    file browser and the estimator list both render empty. `PAGE` is a raw
-    string now; this guards it staying one.
-    """
-    from stabilis.gui import PAGE
-
-    for lineno, line in enumerate(PAGE.splitlines(), 1):
-        # Ignore HTML lines; only the script body matters, and an odd
-        # number of quotes there means a literal spans a newline.
-        if "<" in line or "//" in line:
-            continue
-        assert line.count('"') % 2 == 0, f"unbalanced quote at page line {lineno}"
+@pytest.mark.parametrize("text,want", [
+    ("NCS", [10.0, 20.0, 30.0]),
+    ("NCS - VSL", [6.0, 15.0, np.nan]),
+    ("-VSL", [-4.0, -5.0, np.nan]),
+    ("NCS / 10", [1.0, 2.0, 3.0]),
+    ("NCS * 2 - VSL", [16.0, 35.0, np.nan]),
+    ("(NCS - VSL) / 2", [3.0, 7.5, np.nan]),
+    ("#1 - #2", [6.0, 15.0, np.nan]),
+    ("ncs - vsl", [6.0, 15.0, np.nan]),
+    ("NCS - 1e1", [0.0, 10.0, 20.0]),
+])
+def test_the_grammar_covers_what_the_page_promises(text, want):
+    got, _ = expr.evaluate(text, LABELS, ROWS)
+    np.testing.assert_allclose(got, want)
 
 
-def test_the_page_offers_column_and_unit_controls(server):
-    """Asked for directly: pick which column, and say what units it is in."""
-    with urllib.request.urlopen(server + "/") as r:
-        page = r.read().decode()
-    for element in ('id="time_column"', 'id="unit"', 'id="dirpath"',
-                    'id="godir"', 'id="serieslist"', 'id="samerange"',
-                    'id="addseries"', 'id="avail"', 'data-f="column"'):
-        assert element in page, element
-    assert '"ns"' in page and '"ps"' in page
+def test_multiplication_binds_tighter_than_addition():
+    got, _ = expr.evaluate("NCS + VSL * 2", LABELS, ROWS)
+    np.testing.assert_allclose(got[:2], [18.0, 30.0])
 
 
-# ---------------------------------------------------------------------------
-# Columns and units
-# ---------------------------------------------------------------------------
+def test_a_label_containing_a_space_is_still_one_column():
+    labels = ("column 0", "column 1")
+    rows = np.array([[1.0, 2.0], [3.0, 4.0]])
+    got, _ = expr.evaluate("column 1 - column 0", labels, rows)
+    np.testing.assert_allclose(got, [1.0, 1.0])
 
 
-@pytest.fixture
-def three_column(tmp_path):
-    """time, a junk column, then phase -- the shape real exports come in."""
-    x = np.cumsum(np.random.default_rng(1).standard_normal(2000)) * 1e-3
-    t = np.arange(2000, dtype=float)
-    np.savetxt(tmp_path / "three.dat",
-               np.column_stack([t, np.full_like(x, 7.0), x]), fmt="%.9f")
-    return tmp_path
+def test_a_zero_divisor_becomes_a_gap_and_is_counted():
+    labels, rows = ("a", "b"), np.array([[1.0, 2.0], [1.0, 0.0]])
+    got, blown = expr.evaluate("a / b", labels, rows)
+    assert blown == 1
+    assert np.isnan(got[1]) and got[0] == 0.5
 
 
-def test_the_chosen_column_is_the_one_analysed(three_column, server):
-    _Handler.root = three_column.resolve()
-    status, body = post(server, "/api/analyze", {
-        "path": "three.dat", "data_kind": "phase", "column": "2",
-        "time_column": "0", "unit": "s", "taus": "decade"})
-    assert status == 200, body
-    assert body["column"] == "2", "the column field now carries the expression"
-    assert body["rate_hz"] == 1.0, "rate inferred from the time column"
-
-    # Column 1 is a constant, so its ADEV is zero -- proof the selector
-    # actually selects rather than defaulting to column 0.
-    status, flat = post(server, "/api/analyze", {
-        "path": "three.dat", "column": "1", "time_column": "0",
-        "unit": "s", "taus": "decade"})
-    assert status == 200, flat
-    assert flat["rows"][0]["dev"] == 0.0
+def test_an_unknown_column_names_the_ones_that_exist():
+    with pytest.raises(expr.ExpressionError, match="NCS"):
+        expr.evaluate("MASER", LABELS, ROWS)
 
 
-@pytest.mark.parametrize("unit,factor", [("s", 1.0), ("ns", 1e-9), ("ps", 1e-12)])
-def test_units_scale_the_answer_exactly(three_column, server, unit, factor):
-    """A file in ns analysed as s is wrong by a billion and looks plausible."""
-    _Handler.root = three_column.resolve()
-    base = post(server, "/api/analyze", {
-        "path": "three.dat", "column": "2", "time_column": "0",
-        "unit": "s", "taus": "decade"})[1]["rows"][0]["dev"]
-    got = post(server, "/api/analyze", {
-        "path": "three.dat", "column": "2", "time_column": "0",
-        "unit": unit, "taus": "decade"})[1]["rows"][0]["dev"]
-    assert got == pytest.approx(base * factor, rel=1e-12)
+def test_a_column_index_out_of_range_is_refused():
+    with pytest.raises(expr.ExpressionError, match="out of range"):
+        expr.evaluate("#9", LABELS, ROWS)
 
 
-def test_an_unknown_unit_is_refused_with_the_valid_list(three_column, server):
-    _Handler.root = three_column.resolve()
-    status, body = post(server, "/api/analyze", {
-        "path": "three.dat", "column": "2", "unit": "furlongs", "rate": "1.0"})
-    assert status == 400
-    assert "furlongs" in body["error"] and "'ns'" in body["error"]
+def test_the_page_can_rename_columns_and_expressions_follow(server):
+    """The user's names override the file's; that is what makes them useful."""
+    code, reply = post(server, "/api/traces",
+                       {"path": "sub/run.csv",
+                        "labels": ["time", "maser", "ref"],
+                        "series": [{"expr": "maser - ref"}], "target": 100})
+    assert code == 200
+    assert reply["series"][0]["stats"]["n"] == 600
 
 
-def test_a_unit_conversion_is_recorded_rather_than_folded_in_silently(tmp_path):
-    """A rescaled input must be visible in provenance, not just in the number."""
-    from stabilis.gui import _rescale
-    from stabilis.types import PhaseSeries
-
-    series = PhaseSeries(np.arange(10.0), rate_hz=1.0)
-    scaled = _rescale(series, "ns", is_phase=True)
-    assert scaled.x[1] == pytest.approx(1e-9)
-    actions = [s.action for s in scaled.provenance.steps]
-    assert "unit_conversion" in actions
-
-    # A no-op conversion adds no step, so the log stays honest about what
-    # actually happened.
-    same = _rescale(series, "s", is_phase=True)
-    assert "unit_conversion" not in [s.action for s in same.provenance.steps]
+def test_a_label_override_of_the_wrong_length_is_ignored_not_shifted(server):
+    """Half a rename would silently analyse a different column."""
+    code, reply = post(server, "/api/traces",
+                       {"path": "sub/run.csv", "labels": ["only-one"],
+                        "series": [{"expr": "NCS"}], "target": 50})
+    assert code == 200 and reply["series"][0]["stats"]["n"] == 600
 
 
 # ---------------------------------------------------------------------------
-# The preparation stage
+# drawing two million points into nine hundred pixels
 # ---------------------------------------------------------------------------
-
 
 def test_decimation_keeps_spikes_that_stride_sampling_would_lose():
-    """The property the preview exists for.
-
-    A preview is for spotting the glitch you are about to exclude. Taking
-    every k-th point gives a one-sample spike a (k-1)/k chance of vanishing
-    -- 96% at this reduction. Min/max per bucket keeps the envelope, so the
-    spike is still there.
-    """
-    from stabilis.gui import _decimate
-
-    # Every spike position, not one lucky index: 20 000 happens to be a
-    # multiple of the stride, so stride sampling would have kept *that* one
-    # and the comparison would have proved nothing.
-    kept_by_decimation, kept_by_stride = 0, 0
-    step = 50_000 // 1000
-    for where in range(19_990, 20_030):
-        values = np.zeros(50_000)
-        values[where] = 8.0
-
-        idx, shown = _decimate(values, target=2000)
-        assert shown.size <= 2000
-        if shown.max() == 8.0:
-            kept_by_decimation += 1
-            assert idx[np.argmax(shown)] == where, "kept its original index"
-        if values[::step].max() == 8.0:
-            kept_by_stride += 1
-
-    assert kept_by_decimation == 40, "min/max keeps every spike"
-    assert kept_by_stride <= 2, "stride sampling loses almost all of them"
+    values = np.zeros(100_000)
+    values[54_321] = 7.0
+    values[54_322] = -7.0
+    drawn = prepare.envelope(values, 0, values.size, target=1000)
+    assert drawn["kind"] == "envelope"
+    assert np.nanmax(drawn["hi"]) == 7.0
+    assert np.nanmin(drawn["lo"]) == -7.0
 
 
 def test_decimation_is_a_no_op_on_a_short_record():
-    from stabilis.gui import _decimate
-
     values = np.arange(50.0)
-    idx, shown = _decimate(values, target=2000)
-    assert np.array_equal(shown, values)
-    assert np.array_equal(idx, np.arange(50))
+    drawn = prepare.envelope(values, 0, 50, target=1000)
+    assert drawn["kind"] == "points"
+    np.testing.assert_array_equal(drawn["lo"], values)
+    np.testing.assert_array_equal(drawn["i0"], np.arange(50))
 
 
-def test_preview_returns_a_plot_and_a_suggested_grid(server):
-    status, body = post(server, "/api/preview", {
-        "path": "sub/run.dat", "data_kind": "phase", "column": "0",
-        "rate": "1.0", "unit": "s"})
-    assert status == 200, body
-    assert body["n"] == 600
-    assert len(body["png"]) > 1000
-    assert body["shown"] <= 2000
-    assert body["suggest"]["mode"] in ("all", "octave")
-    assert body["suggest"]["why"]
+def test_a_bucket_of_pure_gap_stays_a_gap():
+    """A break in the record must stay a break, not become a zero."""
+    values = np.arange(10_000.0)
+    values[2000:4000] = np.nan
+    drawn = prepare.envelope(values, 0, values.size, target=200)
+    assert np.isnan(np.asarray(drawn["lo"], dtype=float)).any()
 
 
-def test_preview_reports_file_defects_rather_than_hiding_them(server, tmp_path):
-    _Handler.root = tmp_path.resolve()
-    (tmp_path / "messy.dat").write_text(
-        "1.0 2.0\n3.0\n5.0 NaN\n7.0 8.0\n", encoding="ascii")
-    status, body = post(server, "/api/preview",
-                        {"path": "messy.dat", "column": "0", "rate": "1.0"})
-    assert status == 200, body
-    assert body["defects"] and "short rows" in body["defects"]
+def test_a_bucket_holding_one_good_sample_reports_it():
+    values = np.full(10_000, np.nan)
+    values[5555] = 3.0
+    drawn = prepare.envelope(values, 0, values.size, target=200)
+    assert np.nanmax(drawn["hi"]) == 3.0
 
 
-def test_a_selected_range_is_applied_and_its_equivalent_call_printed(server):
-    """An exclusion that exists only as a mouse gesture is not evidence."""
-    status, body = post(server, "/api/analyze", {
-        "path": "sub/run.dat", "rate": "1.0", "taus": "octave",
-        "start": "100", "stop": "400", "reason": "after warm-up"})
-    assert status == 200, body
-    assert body["prep"]["summary"]["n"] == 300, "only the selection analysed"
-
-    calls = body["prep"]["calls"]
-    assert len(calls) == 1
-    assert "edit.select_range(series, 100, 400" in calls[0]
-    assert "after warm-up" in calls[0], "the reason travels into the code shown"
-
-
-def test_outlier_rejection_from_the_page_marks_gaps_and_is_printed(server,
-                                                                   tmp_path):
-    _Handler.root = tmp_path.resolve()
-    rng = np.random.default_rng(1)
-    x = np.cumsum(rng.standard_normal(2000)) * 1e-12
-    x[1000] += 5e-9
-    np.savetxt(tmp_path / "spike.dat", x, fmt="%.15e")
-
-    status, body = post(server, "/api/analyze", {
-        "path": "spike.dat", "rate": "1.0", "taus": "octave",
-        "outlier_threshold": "6", "reason": "counter glitch"})
-    assert status == 200, body
-    summary = body["prep"]["summary"]
-    assert summary["n"] == 2000, "nothing deleted; the record keeps its length"
-    assert summary["n_gaps"] >= 1, "the spike became a gap"
-    assert any("drop_outliers" in c for c in body["prep"]["calls"])
+def test_zooming_in_returns_detail_the_zoomed_out_view_averaged_away(server):
+    """Level of detail, from the cached array -- not a magnified picture."""
+    wide = post(server, "/api/traces", {"path": "sub/run.csv",
+                                        "series": [{"expr": "NCS"}],
+                                        "view": [0, 600], "target": 40})[1]
+    near = post(server, "/api/traces", {"path": "sub/run.csv",
+                                        "series": [{"expr": "NCS"}],
+                                        "view": [100, 140], "target": 40})[1]
+    assert wide["series"][0]["kind"] == "envelope"
+    assert near["series"][0]["kind"] == "points"
+    assert near["series"][0]["i0"][0] == 100
+    assert len(near["series"][0]["i0"]) == 40
 
 
-def test_no_preparation_means_no_calls_and_no_claim_of_any(server):
-    status, body = post(server, "/api/analyze", {
-        "path": "sub/run.dat", "rate": "1.0", "taus": "octave"})
-    assert status == 200, body
-    assert body["prep"]["calls"] == []
-    assert body["prep"]["summary"]["n"] == 600
+def test_stage_one_shows_the_file_and_stage_two_shows_the_library_input(server):
+    """The second plot is captioned "value handed to the library"; be that.
 
-
-# ---------------------------------------------------------------------------
-# Several columns at once
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def multi(tmp_path):
-    """Three columns on wildly different scales, as a real export has."""
-    rng = np.random.default_rng(4)
-    n = 3000
-    a = np.cumsum(rng.standard_normal(n)) * 1e-12
-    b = np.cumsum(rng.standard_normal(n)) * 1e-9
-    c = np.cumsum(rng.standard_normal(n)) * 1e-15
-    np.savetxt(tmp_path / "three.dat", np.column_stack([a, b, c]), fmt="%.15e")
-    return tmp_path
-
-
-def test_preview_stacks_one_panel_per_column(multi, server):
-    """Stacked, not overlaid: on one axis the 1e-9 column would flatten the
-    other two into lines at zero, which is the opposite of a preview."""
-    _Handler.root = multi.resolve()
-    status, body = post(server, "/api/preview", {
-        "path": "three.dat", "columns": [0, 1, 2],
-        "labels": ["A-B", "B-C", "C-A"], "rate": "1.0", "unit": "s"})
-    assert status == 200, body
-    assert body["panels"] == 3
-    assert [s["label"] for s in body["series"]] == ["A-B", "B-C", "C-A"]
-    assert all(s["n"] == 3000 for s in body["series"])
-
-
-def test_an_unlabelled_column_gets_a_usable_default(multi, server):
-    _Handler.root = multi.resolve()
-    _status, body = post(server, "/api/preview",
-                         {"path": "three.dat", "columns": [1], "rate": "1.0"})
-    assert body["series"][0]["label"] == "1", "the expression is the default label"
-
-
-def test_each_column_can_carry_its_own_range(multi, server):
-    """The per-series ranges, applied independently."""
-    _Handler.root = multi.resolve()
-    status, body = post(server, "/api/analyze", {
-        "path": "three.dat", "columns": [0, 1], "labels": ["first", "second"],
-        "ranges": [[0, 1000], [2000, 3000]], "rate": "1.0", "taus": "octave",
-        "reason": "per-series windows"})
-    assert status == 200, body
-    assert len(body["series"]) == 2
-    assert body["series"][0]["prep"]["summary"]["n"] == 1000
-    assert body["series"][1]["prep"]["summary"]["n"] == 1000
-    assert "0, 1000" in body["series"][0]["prep"]["calls"][0]
-    assert "2000, 3000" in body["series"][1]["prep"]["calls"][0]
-
-
-def test_one_range_can_be_shared_by_every_column(multi, server):
-    """What the "one range for all" box does, expressed as identical spans."""
-    _Handler.root = multi.resolve()
-    _status, body = post(server, "/api/analyze", {
-        "path": "three.dat", "columns": [0, 1, 2],
-        "ranges": [[500, 1500]] * 3, "rate": "1.0", "taus": "octave",
-        "reason": "same window everywhere"})
-    assert {s["prep"]["summary"]["n"] for s in body["series"]} == {1000}
-
-
-def test_every_column_appears_as_its_own_curve(multi, server):
-    """Overlaid here, unlike the preview: a sigma-tau plot is already
-    log-log, and comparing channels on one axis is the point of it."""
-    _Handler.root = multi.resolve()
-    _status, body = post(server, "/api/analyze", {
-        "path": "three.dat", "columns": [0, 1, 2],
-        "labels": ["x", "y", "z"], "rate": "1.0", "taus": "octave"})
-    assert [s["label"] for s in body["series"]] == ["x", "y", "z"]
-    assert all(len(s["rows"]) > 5 for s in body["series"])
-    # Different scales must give different answers -- proof the columns are
-    # actually distinct rather than column 0 read three times.
-    firsts = [s["rows"][0]["dev"] for s in body["series"]]
-    assert firsts[1] > firsts[0] > firsts[2]
-
-
-def test_the_page_binds_the_drag_so_the_browser_cannot_steal_it():
-    """The bug that made selection do nothing.
-
-    An `<img>` is natively draggable, so mousedown starts the browser's own
-    image drag and swallows every mousemove and mouseup after it. Both the
-    attribute and the preventDefault are needed, and neither is visible to
-    an HTTP-level test -- hence checking the page source.
+    These columns carry a ~0.35 s pedestal. Drawn with it, the trace is a
+    flat line with the whole signal invisible inside the width of it -- and
+    it would be showing something the estimators never see, since the
+    pedestal is removed before construction.
     """
-    from stabilis.gui import PAGE
+    def first(**extra):
+        body = {"path": "sub/run.csv", "series": [{"expr": "NCS"}],
+                "target": 40}
+        return post(server, "/api/traces", dict(body, **extra))[1]["series"][0]
 
-    assert 'draggable="false"' in PAGE
-    assert "ev.preventDefault()" in PAGE
-    assert "img.ondragstart" in PAGE
-    # Release is tracked on the window, so letting go outside the plot
-    # still completes the selection.
-    assert "window.onmouseup" in PAGE
+    assert first()["hi"][0] == pytest.approx(0.35, abs=0.01)
+    assert abs(first(scaled=True, unit="s")["hi"][0]) < 1e-9
+
+
+def test_the_unit_scales_the_preview_exactly_too(server):
+    seconds = post(server, "/api/traces", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}], "target": 40,
+        "scaled": True, "unit": "s"})[1]["series"][0]["hi"]
+    nanos = post(server, "/api/traces", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}], "target": 40,
+        "scaled": True, "unit": "ns"})[1]["series"][0]["hi"]
+    np.testing.assert_allclose(nanos, np.asarray(seconds) * 1e-9, rtol=1e-12)
+
+
+def test_gaps_reach_the_page_as_null_not_as_invalid_json(server, tree):
+    """`json.dumps` writes a bare NaN, which `JSON.parse` refuses outright."""
+    values = np.arange(100.0)
+    values[10] = np.nan
+    np.savetxt(tree / "holed.dat", values, fmt="%.15e")
+    code, body = post(server, "/api/traces",
+                      {"path": "holed.dat", "series": [{"expr": "#0"}],
+                       "target": 500})
+    assert code == 200
+    assert body["series"][0]["lo"][10] is None
+
+
+# ---------------------------------------------------------------------------
+# windows
+# ---------------------------------------------------------------------------
+
+def test_overlapping_windows_are_merged_rather_than_double_counted():
+    assert prepare.clamp_windows([[0, 100], [50, 200]], 500) == [(0, 200)]
+    assert prepare.clamp_windows([[300, 400], [0, 100]], 500) == [(0, 100),
+                                                                  (300, 400)]
+
+
+def test_a_window_running_past_the_record_is_clamped():
+    assert prepare.clamp_windows([[-10, 10_000]], 500) == [(0, 500)]
+
+
+def test_a_window_too_short_to_analyse_is_dropped():
+    assert prepare.clamp_windows([[10, 11]], 500) == []
+
+
+def test_each_window_becomes_its_own_result_by_default(server):
+    code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS - VSL", "label": "A"}],
+        "windows": [[0, 200], [300, 600]], "rate": 1.0, "reason": "warm-up"})
+    assert code == 200
+    assert [s["label"] for s in body["series"]] == ["A [0:200]", "A [300:600]"]
+    assert [s["n"] for s in body["series"]] == [200, 300]
+    assert all(s["summary"]["n_gaps"] == 0 for s in body["series"])
+
+
+def test_joined_windows_become_one_record_with_the_rest_as_gaps(server):
+    code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS - VSL", "label": "A"}],
+        "windows": [[0, 200], [300, 600]], "join": True, "rate": 1.0,
+        "reason": "warm-up"})
+    assert code == 200
+    assert len(body["series"]) == 1
+    summary = body["series"][0]["summary"]
+    assert summary["n"] == 600 and summary["n_gaps"] == 100
+    assert summary["runs"] == 2
+
+
+def test_joining_windows_never_interpolates_and_records_that_it_did_not():
+    """Gap filling is a later milestone; the page must not improvise one."""
+    from stabilis.types import PhaseSeries
+
+    series = PhaseSeries(np.arange(100.0) * 1e-12, rate_hz=1.0)
+    masked = prepare.exclude_between(series, [(0, 20), (60, 100)], "why")
+    assert np.isnan(masked.x[20:60]).all()
+    step = masked.provenance.steps[-1]
+    assert step.action == "exclude_between_windows"
+    assert "nothing interpolated" in step.outcome
+    assert step.params["dropped"] == 40
+
+
+def test_the_step_log_reaches_the_page(server):
+    """Provenance that nobody can read is barely better than none."""
+    _code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}],
+        "windows": [[0, 300]], "rate": 1.0, "reason": "after warm-up"})
+    steps = body["series"][0]["steps"]
+    assert "select_range" in [s["action"] for s in steps]
+    assert any("after warm-up" in str(s["params"]) for s in steps)
+
+
+# ---------------------------------------------------------------------------
+# units and analysis
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("unit,factor", list(prepare.PHASE_UNITS.items()))
+def test_units_scale_the_answer_exactly(server, unit, factor):
+    def run(with_unit):
+        return post(server, "/api/analyze", {
+            "path": "sub/run.csv", "series": [{"expr": "NCS"}],
+            "rate": 1.0, "unit": with_unit, "estimator": "oadev",
+            "confidence": False, "reason": "units",
+        })[1]["series"][0]["rows"]["dev"]
+
+    np.testing.assert_allclose(run(unit), np.asarray(run("s")) * factor,
+                               rtol=1e-12)
+
+
+def test_an_unknown_unit_is_refused_with_the_valid_list(server):
+    code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}],
+        "rate": 1.0, "unit": "furlongs", "reason": "x"})
+    assert code == 400
+    assert "furlongs" in body["error"] and "'ns'" in body["error"]
+
+
+def test_an_unknown_estimator_is_refused_with_the_valid_list(server):
+    code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}],
+        "rate": 1.0, "estimator": "banana", "reason": "x"})
+    assert code == 400 and "oadev" in body["error"]
+
+
+def test_a_result_carries_the_table_the_plot_was_drawn_from(server):
+    _code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS - VSL"}],
+        "rate": 1.0, "estimator": "oadev", "reason": "x"})
+    rows = body["series"][0]["rows"]
+    assert len(rows["af"]) == len(rows["tau"]) == len(rows["dev"])
+    assert body["series"][0]["has_ci"] and len(rows["lo"]) == len(rows["dev"])
+    assert all(lo <= d <= hi for lo, d, hi
+               in zip(rows["lo"], rows["dev"], rows["hi"]))
+
+
+def test_a_non_variance_estimator_returns_no_interval_and_says_why(server):
+    _code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}],
+        "rate": 1.0, "estimator": "mtie", "reason": "x"})
+    assert body["series"][0]["has_ci"] is False
+    assert any("mtie" in note for note in body["notes"])
+
+
+def test_the_gui_matches_the_library_called_by_hand(server, tree):
+    """The page must not be able to disagree with the engine.
+
+    The whole design rests on the GUI calling the same functions the CLI
+    does, so this runs the page's own printed recipe by hand and requires
+    bit-identical numbers back.
+    """
+    import stabilis
+    from stabilis import edit
+    from stabilis.io.text import read_table
+
+    _code, body = post(server, "/api/analyze", {
+        "path": "sub/run.csv", "series": [{"expr": "NCS"}],
+        "windows": [[50, 500]], "rate": 1.0, "estimator": "oadev",
+        "confidence": False, "reason": "by hand"})
+
+    labels, rows, _defects = read_table(tree / "sub" / "run.csv")
+    values = np.asarray(rows[1:, list(labels).index("NCS")])  # skip the header
+    series = stabilis.PhaseSeries(values - values[0], rate_hz=1.0)
+    series = edit.select_range(series, 50, 500, by="index", reason="by hand")
+    result = stabilis.oadev(series, taus="octave")
+
+    np.testing.assert_array_equal(body["series"][0]["rows"]["dev"], result.dev)
+
+
+# ---------------------------------------------------------------------------
+# the page's own files
+# ---------------------------------------------------------------------------
+
+def test_every_asset_the_page_asks_for_exists():
+    """A missing file here is a blank page with nothing saying why."""
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    for name in ("app.css", "plot.js", "app.js"):
+        assert name in page
+        assert (ASSETS / name).is_file()
+
+
+def test_the_gui_needs_no_matplotlib(server):
+    """`stabilis gui` is now as numpy-only as the core, and stays that way.
+
+    The page draws on a canvas from numbers, so the server never imports a
+    plotting library. `tests/test_core_deps.py` makes the same assertion for
+    the package as a whole; this one is about the endpoint that used to be
+    the exception.
+    """
+    import sys
+
+    before = set(sys.modules)
+    post(server, "/api/analyze", {"path": "sub/run.csv",
+                                  "series": [{"expr": "NCS"}], "rate": 1.0,
+                                  "reason": "x"})
+    for module in set(sys.modules) - before:
+        assert not module.startswith("matplotlib"), module

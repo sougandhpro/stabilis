@@ -163,10 +163,25 @@ stabilis gui                     # opens http://127.0.0.1:8765
 stabilis gui --root ~/data       # confine the file browser to one tree
 ```
 
-A small local page. Pick a file and a **preview of the raw column appears
-immediately** — because you cannot choose a range you cannot see. Drag on
-it to select one, set the units and the column, clean up outliers, take or
-override the suggested tau grid, and analyse.
+A local page in three stages, which is the order the questions arrive in.
+
+**1 · Data.** Pick a file. It is read **once**, and everything after that is
+a slice of an array already in memory. If it has a header those names are
+filled in; if not the columns are numbered and you name them — either way
+what you type wins, and the expressions in stage 2 follow. The record is
+drawn as a min/max envelope, one pair per pixel column, so a single-sample
+glitch in two million points is still visible where stride sampling would
+have thrown it away with 99.9% probability. Drag to keep a stretch; drag
+again to keep another. Zooming asks for finer detail over the visible span
+rather than magnifying the picture.
+
+**2 · Prepare.** Say what the numbers *are*: phase or frequency, in which
+units, at what rate or off which timebase, and what arithmetic turns the
+file's columns into the quantity of interest.
+
+**3 · Analyse.** Run an estimator over what stage 2 produced and read the
+answer off an interactive log-log curve, all series on one axis or each on
+its own.
 
 Every selection prints **the equivalent non-interactive call**, so the
 session is reproducible and doubles as how you learn the API:
@@ -176,34 +191,57 @@ series = edit.select_range(series, 3000, 50000, by='index', reason='after warm-u
 series = edit.drop_outliers(series, threshold=6.0, reason='counter glitch')
 ```
 
-An exclusion that exists only as a mouse gesture is not evidence.
+An exclusion that exists only as a mouse gesture is not evidence — and the
+full step log is on the page beside the numbers, not just carried in the
+result object.
 
-Each series is a **column expression**, not just a column index, so a
-derived channel needs no preprocessing step of its own:
+Each series is a **column expression**, so a derived channel needs no
+preprocessing step of its own:
 
 | expression | meaning |
 |---|---|
 | `NCS` | that column as it stands |
 | `NCS - VSL` | one channel against another |
 | `-VSL` | the negated column |
-| `A + B - C` | any sum and difference of columns |
+| `(NCS - VSL) / 2` | scaled by a constant — a divider ratio backed out |
+| `#2 * 1e9` | the third column by position, into nanoseconds |
 
-Columns may be named by their file header or by index. Only addition and
-subtraction of whole columns are accepted, and there is no evaluator behind
-the box — the same reason this library refuses pickle. It computes nothing itself — it calls the same
-library functions the CLI does, so the two cannot disagree.
+Columns may be named by header, by the name you gave them, or by `#index`.
+**There is no evaluator behind the box** — a hand-written tokenizer and a
+closed grammar of numbers, columns, `+ - * /` and parentheses, with no name
+lookup that can reach a builtin and no call syntax at all. The tests throw
+`__import__('os').system(...)` at it among other things. It is the same
+reasoning that makes this library refuse pickle: a file, or an expression,
+arriving from someone else's rig is untrusted input.
 
-Units matter and are not guessed: the library works in seconds of phase and
-dimensionless fractional frequency, so a file in nanoseconds is converted
-explicitly and the conversion is recorded in provenance. A `ns` file
-analysed as `s` is wrong by a factor of a billion and looks entirely
-plausible on a log axis.
+Marking several windows has two honest readings and the page offers both:
+each window analysed as its own record and drawn as its own curve, or one
+record spanning them with the stretches between marked as gaps for the
+documented gap policy to handle. **Neither interpolates.** Filling a gap is
+a later milestone, validated against records where the removed points are
+known, and improvising one here would invent exactly the data whose
+exclusion was the point.
+
+Nothing about a timebase is guessed. An MJD column ticks by 1/86400 per
+sample at 1 Hz, so reading it as seconds would put every tau out by that
+factor, plausibly and silently; where the values fit more than one format
+the page refuses and asks rather than choosing. Units are the same story: a
+`ns` file analysed as `s` is wrong by a factor of a billion and looks
+entirely reasonable on a log axis.
+
+It computes nothing you would quote. Every variance, degree of freedom and
+confidence bound comes from `stats/`, through the same calls the CLI makes,
+so the page and the command line cannot disagree — there is a test that
+runs the page's own printed recipe by hand and demands identical numbers.
+The whole of `gui/` imports from `stabilis` and nothing in `stabilis`
+imports from it, so it is a client that could be lifted out entirely.
 
 It uses `http.server` from the standard library and your existing browser,
-so nothing new is installed, and it **binds to 127.0.0.1 only** — the page
-reads local files, so a wider bind would be handing a stranger a file
-reader. `--root` narrows that further, and paths trying to climb out of it
-are refused rather than normalized back in.
+so nothing new is installed; the plots are drawn on a canvas from numbers,
+so **`stabilis gui` needs no matplotlib either**. It **binds to 127.0.0.1
+only** — the page reads local files, so a wider bind would be handing a
+stranger a file reader. `--root` narrows that further, and paths trying to
+climb out of it are refused rather than normalized back in.
 
 This is a convenience for the author's own use, not the workbench in the
 roadmap; that is a separate product built on top of this engine.
