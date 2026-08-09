@@ -37,10 +37,22 @@ Three prices, all of them stated rather than hidden:
   See `theory/cross.md`; the assumption is recorded in provenance because
   it cannot be checked from the records.
 
+More than two channels is `matrix.py`: every pair at once, and then the
+thing the extra channels were for -- **average the off-diagonal terms**,
+since each is an unbiased estimate of the same clock carrying an
+independent draw of its own two channels' noise. The pairs share channels
+and are therefore not independent, which the error bar accounts for rather
+than assuming away. Two channels is one pair, so `reject` on two returns
+bit for bit what `cross_variance` does; they are one implementation.
+
 Alignment is the hard part, not the arithmetic. `align.py` crops records
 to their common window and refuses anything it would have to interpolate
 onto a shared grid, because a silent half-sample slip yields a plausible
-cross-variance that is wrong. `cross.py` is the estimator.
+cross-variance that is wrong. Its `dataset()` is the M-channel form, and
+unions the gaps over every member so that every entry of the matrix is an
+average over the same terms -- without which the entries do not estimate
+one covariance matrix and may not be combined at all. `cross.py` is the
+estimator and owns the Isserlis machinery both paths share.
 
 The three-cornered hat is *not* here. It needs to know which oscillator
 and which instrument each record saw, which is metadata a bare series does
@@ -49,8 +61,10 @@ not carry -- that is `bench/`.
 
 from __future__ import annotations
 
-from .align import Alignment, common_support, overlap
+from .align import Alignment, DataSet, common_support, dataset, overlap
 from .cross import CrossResult, cross_sem, cross_variance
+from .matrix import CrossMatrix, Rejection, cross_matrix, reject
 
-__all__ = ["Alignment", "overlap", "common_support",
-           "CrossResult", "cross_variance", "cross_sem"]
+__all__ = ["Alignment", "overlap", "common_support", "DataSet", "dataset",
+           "CrossResult", "cross_variance", "cross_sem",
+           "CrossMatrix", "cross_matrix", "Rejection", "reject"]

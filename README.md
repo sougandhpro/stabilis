@@ -86,8 +86,8 @@ figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M3 complete, M5's bench model and cross-variances, and the
-measurement report.** 947 tests; `stabilis validate` 32/32.
+**M0–M3 and M5 complete, and the measurement report.** 972 tests;
+`stabilis validate` 33/33.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -109,15 +109,17 @@ legitimately be quoted. Since then:
   that would fix it, *before any data is collected* — and saying which of
   those you already have, since two clocks against a common reference are
   one subtraction away from the edge that closes the triangle.
-- **Cross-variances** — two channels watching one clock, so the
-  instruments' own noise cancels in expectation instead of forming a floor
-  you cannot get under. Neither Stable32 nor `allantools` has this. Because
-  every estimator already returns its coefficient array, cross-AVAR,
-  cross-MVAR, cross-HVAR and cross-TVAR are one function: the auto case is
-  `mean(c²)` and the cross case is `mean(c_a·c_b)`. The estimate is signed
-  and goes negative at long τ, which is reported rather than clipped, and
-  its error bar is not chi-square but an Isserlis form that reduces exactly
-  to the chi-square one when the two channels are the same channel.
+- **Cross-variances and multi-channel noise rejection** — channels
+  watching one clock, so the instruments' own noise cancels in expectation
+  instead of forming a floor you cannot get under. Neither Stable32 nor
+  `allantools` has this. Because every estimator already returns its
+  coefficient array, cross-AVAR, cross-MVAR, cross-HVAR and cross-TVAR are
+  one function: the auto case is `mean(c²)` and the cross case is
+  `mean(c_a·c_b)`. `cross_matrix` does every pair at once and `reject`
+  averages them, which reaches deeper still. The estimate is signed and
+  goes negative at long τ, reported rather than clipped, and its error bar
+  is not chi-square but an exact Isserlis lag sum that reduces to the
+  chi-square one — bit for bit — when the two channels are one channel.
 - **MTIE and TIE rms**, by binary doubling: 10⁶ points over 18 octave τ in
   0.15 s, where the naive form is O(N·m) per τ.
 - **TOTVAR** with its published bias correction, and **Thêo1 / ThêoBR /
@@ -171,10 +173,8 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — `fit.py`, and the rest of `multi/`: alignment and the
-cross-variance are in, the N-channel sweep and the software rejection of a
-multi-channel capture are not. Instrument readers wait on paired vendor
-exports.
+**Next** — `fit.py`, model fitting against the χ² likelihood. Instrument
+readers wait on paired vendor exports.
 
 ## Cross-variances
 
@@ -217,10 +217,29 @@ Three prices, printed rather than hidden:
   assumption is a provenance warning on every call.
 
 The error bar cannot be the chi-square one — a sum of products is unbounded
-below. It comes from Isserlis' theorem instead, and reduces *exactly* to
-`σ²√(2/η)` when the two channels are the same channel, so `cross_variance(a,
-a)` returns the auto-variance bit for bit. See `stabilis docs cross`, which
-also tabulates the estimator that was tried first and rejected.
+below. It comes from Isserlis' theorem instead: an exact sum over the four
+lagged covariances of the two coefficient arrays, approximating nothing,
+which reduces to `σ²√(2/η)` with η exactly `eta1` when the two channels are
+one channel. So `cross_variance(a, a)` returns the auto-variance **and its
+interval** bit for bit — the chi-square error bar is the auto case of this
+one, not a parallel construction. `stabilis docs cross` tabulates the two
+estimators that were tried first and rejected, and where each fails.
+
+### More channels
+
+```bash
+stabilis reject ch_a.dat ch_b.dat ch_c.dat ch_d.dat --rate 1
+```
+
+Every pair is an unbiased estimate of the same clock, so averaging them
+reaches deeper than any one. How much deeper is the same Isserlis sum with
+every pair passed in — and the pairs are **not** independent, since (a,b)
+and (a,c) share a channel. Four channels is six pairs, which would be
+3.9 dB if they were; measured on a clock a factor of three down it is
+3.0 dB at τ = 1 s, falling to nothing by τ = 32 s where the clock dominates
+and there is no instrument noise left to reject. Two channels is one pair,
+so `reject` on two returns exactly what `cross_variance` does — the two
+entry points are one implementation, and there is a test that says so.
 
 ## The measurement report
 

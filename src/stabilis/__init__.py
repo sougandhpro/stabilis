@@ -69,7 +69,17 @@ from .stats import (  # noqa: E402
     theoh,
     wdev,
 )
-from .multi import CrossResult, cross_variance, overlap  # noqa: E402
+from .multi import (  # noqa: E402
+    CrossMatrix,
+    CrossResult,
+    DataSet,
+    Rejection,
+    cross_matrix,
+    cross_variance,
+    dataset,
+    overlap,
+    reject,
+)
 from .synth import power_law_freq, power_law_phase  # noqa: E402
 
 __all__ = [
@@ -111,6 +121,12 @@ __all__ = [
     "identify_curve",
     "cross_variance",
     "CrossResult",
+    "cross_matrix",
+    "CrossMatrix",
+    "reject",
+    "Rejection",
+    "dataset",
+    "DataSet",
     "overlap",
     # synthesis
     "power_law_freq",

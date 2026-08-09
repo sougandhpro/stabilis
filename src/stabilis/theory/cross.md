@@ -99,55 +99,141 @@ theorem. For jointly Gaussian coefficients,
 
     Cov(c_a[i]·c_b[i], c_a[j]·c_b[j]) = R_aa(k)·R_bb(k) + R_ab(k)·R_ba(k)
 
-with `k = i − j`. Take the three correlation *shapes* to be the same —
-they are the same estimator at the same averaging factor, which is a far
-weaker assumption than naming a noise type — and the double sum over `i`
-and `j` collapses onto exactly the `Σρ²` that defines the equivalent
-degrees of freedom. What is left is
+with `k = i − j`, so summing over the `M²` pairs of terms,
 
-    Var(cross_var) = (auto_a · auto_b + cross_var²) / η
+    Var(cross_var) = (1/M)·Σ_k (1 − |k|/M)·[R_aa(k)·R_bb(k)
+                                            + R_ab(k)·R_ba(k)]
 
-and `sem` is its square root. Two things fall out of that expression that
-are worth noticing:
+truncated at `4m` lags for the reason `eta1` truncates. **Nothing is
+approximated.** All four sequences come out of the same zero-padded FFT
+the EDOF machinery already uses — the only new observation is that the
+*cross*-correlation of the two coefficient arrays is as computable as the
+auto. `multi.cross.isserlis_var` evaluates it, and `reject` calls the same
+function with more pairs.
 
-- Setting `b = a` gives `sem = σ²·sqrt(2/η)`, which is the auto-variance
-  result the chi-square interval is built on. The cross error bar is not a
-  parallel construction; it is the same one. `cross_variance(a, a)` returns
-  the auto-variance **bit for bit** and its `sem` matches, and that is a
-  test.
-- `η` is `eta1` from the coefficients — the noise-type-free estimator of
-  `theory/edof.md` — as the geometric mean of the two channels', with
-  `eta3` as its usual short-record fallback. Geometric because `η` divides
-  the *product* `auto_a · auto_b`, and because that is the choice which
-  makes the `b → a` limit above come out exactly.
+Setting `b = a` makes the bracket `2·R(k)²` and the whole expression
+`2σ⁴/η` with `η` **exactly** `eta1`. The chi-square error bar is the auto
+case of this one, not a parallel construction that could drift from it —
+`cross_variance(a, a)` returns the auto-variance bit for bit *and* its
+interval, verified to the last bit rather than to a tolerance. The `η`
+reported on the result is this relation inverted,
+`η = (auto_a·auto_b + cross²)/sem²`, so it stays comparable with every
+other degrees-of-freedom number in the library.
 
-### The estimator this replaced
+Below `MIN_TERMS_FOR_ETA1` terms, or when the truncated lag sum comes out
+negative, the error bar falls back to the equal-shape closed form on `η₃` —
+a lower bound on the degrees of freedom and therefore an upper bound on
+the bar, which is the direction a fallback must err in. `edof_method`
+records which path each τ took.
 
-The obvious alternative needs no Gaussian assumption at all: estimate the
-variance of `mean(p)` directly from the products' own autocovariance, with
-the Bartlett weight `1 − k/M` truncated at `4m`, which is the same
-Newey–West form `eta1` embodies. It was implemented first. Measured
-against Monte-Carlo scatter over 300 realizations at N = 4096:
+### Two estimators this replaced
 
-| m | N/64 | N/32 | N/16 | N/8 | N/4 |
-|---|---|---|---|---|---|
-| Bartlett on the products | 0.89 | 0.73 | 0.56 | 0.37 | 0.30 |
-| Isserlis on `eta1` | 0.99 | 0.99 | 1.03 | 1.05 | 0.89 |
+Both were implemented, both were measured against Monte-Carlo scatter over
+300 realizations at N = 4096, and both are still in `tests/test_cross.py`
+being measured on the same realizations — so this is a live comparison
+rather than a paragraph.
 
-as a ratio to the true scatter — so the first is optimistic by a factor of
-three at the long-τ end, in the direction that matters. Lengthening the lag
-limit made it worse, and so did the unbiased normalization, which rules out
-truncation bias as the cause. The reason is distributional: the products
-are heavy-tailed where the coefficients are Gaussian, so each additional
-lag of their sample autocovariance contributes more noise than signal and
-the sum shrinks towards zero.
+**A Bartlett sum over the products' own autocovariance**, with the weight
+`1 − k/M` truncated at `4m`. It is the obvious thing to do and assumes no
+distribution at all.
 
-`tests/test_cross.py` keeps the rejected estimator and measures both, so
-the finding is a live measurement rather than a paragraph.
+**The equal-shape closed form.** Take `R_aa`, `R_bb` and `R_ab` to have the
+same shape and differ only in scale, and the double sum above collapses
+onto the `Σρ²` that defines the EDOF, leaving
+`Var = (auto_a·auto_b + cross²)/η` with `η` the geometric mean of the two
+channels' `eta1`. Simple, and it is what `cross_sem` still computes.
+
+As a ratio to the true scatter — one means the error bar is right, below
+one means it is too narrow. Two channels, N = 4096, 300 realizations, all
+three computed on the same records:
+
+| m | 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 |
+|---|---|---|---|---|---|---|---|---|---|
+| Bartlett on the products | 0.97 | 0.98 | 1.05 | 1.00 | 0.97 | 0.91 | 0.90 | 0.85 | 0.64 |
+| equal-shape closed form | 0.98 | 0.99 | 1.04 | 0.93 | 0.90 | 0.90 | 1.00 | 1.09 | 1.11 |
+| exact lag sum | 0.97 | 0.98 | 1.06 | 1.02 | 1.01 | 0.98 | 1.05 | 1.12 | 1.13 |
+
+The two failures have different causes, sit in different places, and
+neither is truncation bias.
+
+The Bartlett form decays monotonically towards the **long-τ** end, reaching
+0.64 at `m = N/16` here and 0.30 at `m = N/4` on a longer grid — optimistic
+by a factor of three where the error bar matters most. Lengthening the lag
+limit made it worse and so did the unbiased normalization, which is what
+rules out truncation. The cause is distributional: the products are
+heavy-tailed where the coefficients are Gaussian, so each additional lag of
+their sample autocovariance contributes more noise than signal and the sum
+shrinks towards zero.
+
+The equal-shape form dips 7–10 % in the **middle** and is fine at both
+ends, and that shape is the diagnosis. At short τ the instrument dominates
+and at long τ the clock does; in each limit one process sets all three
+correlation shapes, and collapsing them onto one is then exact. In between
+they contribute comparably, `R_aa` carries the mixture while `R_ab` carries
+only the clock, and the shapes genuinely differ. The dip is systematic
+rather than scatter: on M = 3 channels, where averaging three pairs
+sharpens it, three independent seeds gave 0.81–0.88 across `m = 8` to `32`
+against 0.96–1.04 for the exact sum on the same records.
+
+Both failures are worse for the M-channel average than for one pair, which
+is why the exact sum went in before `reject` was written rather than after:
+averaging P pairs shrinks the scatter being predicted without shrinking a
+systematic error in the prediction.
 
 With asymmetric channels — white PM in one, flicker PM in the other, three
-decades apart in level — the equal-shape approximation is at its worst and
-the Isserlis form runs 0 to 30 % **high**, which is the safe direction.
+decades apart in level — the exact form runs 0 to 30 % **high**, which is
+the safe direction.
+
+## More than two channels
+
+`cross_matrix` computes every pair at once and `reject` averages the
+off-diagonal terms:
+
+    reject = (2 / (M(M−1))) · Σ_{i<j} cross_ij
+
+Each is an unbiased estimate of the same clock variance carrying an
+independent draw of its own two channels' noise, so the average reaches
+deeper than any single pair. The cost is `M` estimator runs and `M(M+1)/2`
+array products — not `M²` estimator runs — because the coefficients are
+computed once per channel and reused in every pair they appear in.
+
+**How much deeper is not a rule of thumb.** It is `isserlis_var` again,
+with every pair passed in instead of one: the covariance of two pair
+estimates is the same lag sum with the four subscripts taken from the two
+pairs, and the variance of the average is that summed over every ordered
+pair of pairs, divided by `P²`. Two channels is one pair, so `reject` on
+two channels returns *exactly* what `cross_variance` returns on them —
+variance, error bar and η, bit for bit. That is a test, and it is what
+keeps the two entry points one implementation.
+
+The pairs are **not** independent: (1,2) and (1,3) share channel 1, and
+the shared channel's own covariance appears in their cross term. Treating
+`P = M(M−1)/2` pairs as `P` independent estimates claims a rejection that
+is not there. Measured on four channels of a clock a factor of three under
+them, the naive `5·log10(P)` gain of 3.9 dB is really 3.0 dB at τ = 1 s,
+and falls to nothing by τ = 32 s — where the clock dominates, there is no
+instrument noise left to reject and extra channels buy nothing at all.
+Only when `A_ij ≪ A_ii` do the shared terms vanish and the gain approach
+`5·log10(P·η)`.
+
+**Why a plain average and not the best linear unbiased one.** The BLUE
+weights the pairs by the inverse of that covariance matrix, and is
+genuinely more efficient when the covariance is known. It is not known —
+it is the matrix itself, estimated from the very data being weighted — and
+inverting a noisy estimate to weight the sample it came from makes the
+weights correlate with the noise they are meant to suppress, which is a
+well-established way to get an answer that is both wrong and confident.
+The unweighted mean has no such feedback and its variance is computed
+exactly rather than assumed. When the channels differ enough for weighting
+to matter, `Rejection.notes` says so and suggests dropping the loud channel
+and comparing, which is a test the data can actually support.
+
+**A dataset unions the gaps across every member, not pairwise.** A channel
+with heavy dropouts therefore costs every other channel. That is the price
+of a matrix that estimates *one* covariance matrix: done pairwise, entry
+(1,2) and entry (1,3) would be averages over different sets of terms, and
+combining them — which is exactly what the rejection does — would be adding
+numbers that do not belong to the same experiment.
 
 ## Alignment, which is the part that bites
 
@@ -191,13 +277,16 @@ oracle. What needs measuring is everything the auto case cannot show.
 
 | claim | how it is checked | where |
 |---|---|---|
-| the cross form is the auto form | `cross_variance(a, a)` equals `oadev(a)` exactly, and its `sem` equals `σ²√(2/η)` | `tests/test_cross.py` |
-| it recovers a clock the auto-variance cannot see | synthetic clock 3× below its channels' noise; cross within 15 % of the record that generated it, auto 50 % high or worse | `tests/test_cross.py` |
-| the error bar is the scatter of the estimate | 300 realizations, mean `sem` over measured standard deviation, within ±20 % for every τ up to N/4 | `tests/test_cross.py` (slow) |
-| the rejected Bartlett estimator is worse | same realizations, paired | `tests/test_cross.py` (slow) |
+| the cross form is the auto form | `cross_variance(a, a)` equals `oadev(a)` exactly, and its `sem` equals `σ²√(2/η)` with η exactly `eta1` | `tests/test_cross.py` |
+| the M-channel path is the pairwise one | `reject` on two channels equals `cross_variance` bit for bit, error bar and η included | `tests/test_matrix.py` |
+| it recovers a clock the auto-variance cannot see | synthetic clock 3× below its channels' noise; cross within 15 % of the record that generated it, auto 50 % high or worse | `tests/test_cross.py`, `tests/test_matrix.py` |
+| the error bar is the scatter of the estimate | 300 realizations, mean `sem` over measured standard deviation, within ±20 % for every τ up to N/4; again at M = 3 and M = 4 | `tests/test_cross.py`, `tests/test_matrix.py` (slow) |
+| both rejected estimators are worse, and where | same realizations, paired three ways | `tests/test_cross.py` (slow) |
 | asymmetric channels fail conservatively | white PM against flicker PM, three decades apart | `tests/test_cross.py` (slow) |
-| uncorrelated records cross to zero and go negative | every point within 3 `sem` of zero | `tests/test_cross.py` |
+| extra channels buy a real but sub-naive gain | four channels against two, gain positive and below `5 log10 P` | `tests/test_matrix.py` |
+| uncorrelated records cross to zero and go negative | every point within 3 `sem` of zero | `tests/test_cross.py`, `tests/test_matrix.py` |
 | alignment refuses what it cannot fix | rate slip, sub-sample epoch, no overlap, mixed domains | `tests/test_cross.py` |
+| a dataset unions gaps over every member | three channels, three different dropouts | `tests/test_matrix.py` |
 | `stats/` never imports `multi/` | AST scan of the whole package | `tests/test_cross.py` |
 
 `stabilis validate` carries the rejection measurement as a `coverage` row.

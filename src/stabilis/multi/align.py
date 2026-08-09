@@ -44,8 +44,8 @@ import numpy as np
 from ..log import record
 from ..types import FreqSeries, PhaseSeries
 
-__all__ = ["Alignment", "overlap", "common_support", "MAX_SLIP_SAMPLES",
-           "MAX_GRID_OFFSET_SAMPLES"]
+__all__ = ["Alignment", "DataSet", "overlap", "common_support", "dataset",
+           "MAX_SLIP_SAMPLES", "MAX_GRID_OFFSET_SAMPLES"]
 
 # How far the records may drift apart over the cropped window, in samples,
 # before the rates count as different. Half a sample is the point at which
@@ -219,3 +219,81 @@ def common_support(series) -> tuple:
         )
         out.append(replace(_with_values(s, values), provenance=prov))
     return tuple(out)
+
+
+@dataclass(frozen=True)
+class DataSet:
+    """Named records of one experiment, on one grid with one gap pattern.
+
+    Data, not behaviour: it is what `dataset()` produced and nothing more.
+    The point of it is that every member is *comparable to every other
+    member term by term*, which is the precondition for a cross-variance
+    and is tedious and error-prone to maintain by hand across six files
+    from six counters.
+
+    `alignment` is carried rather than flattened because what was cropped
+    is evidence. A user who wonders why a six-channel solve used 40 % of
+    the record they logged should be able to read the answer off the
+    object, not re-derive it.
+    """
+
+    names: tuple[str, ...]
+    series: tuple
+    alignment: Alignment
+
+    @property
+    def n(self) -> int:
+        return self.alignment.n
+
+    @property
+    def rate_hz(self) -> float:
+        return self.alignment.rate_hz
+
+    @property
+    def epoch(self) -> float:
+        return self.alignment.epoch
+
+    def __len__(self) -> int:
+        return len(self.names)
+
+    def __getitem__(self, name: str):
+        """The series under `name`, or a KeyError that lists what there is."""
+        try:
+            return self.series[self.names.index(name)]
+        except ValueError:
+            raise KeyError(
+                f"no series named {name!r}; this dataset holds "
+                f"{list(self.names)}"
+            ) from None
+
+
+def dataset(named_series) -> DataSet:
+    """Crop a mapping of named records to one window and one gap pattern.
+
+    `overlap` then `common_support`, in that order, over all of them at
+    once. The second step is the one worth pausing on: the gaps are unioned
+    across **every** member, not pairwise, so a channel with heavy dropouts
+    costs every other channel too.
+
+    That is deliberate and it is the price of a *consistent* matrix. Doing
+    it pairwise would give each entry the most data it could have, and the
+    resulting table would not be an estimate of any one covariance matrix:
+    entry (1,2) and entry (1,3) would be averages over different sets of
+    terms, so the algebra that combines them -- the noise rejection below,
+    or any solve -- would be adding numbers that do not belong to the same
+    experiment. A cheaper matrix that means something beats a fuller one
+    that does not.
+
+    Insertion order is preserved, because the matrix's rows and columns are
+    reported by name and a reader comparing two runs should not have to
+    check whether the axes moved.
+    """
+    items = dict(named_series)
+    if len(items) < 2:
+        raise ValueError(
+            f"a dataset needs at least two records, got {len(items)}. One "
+            "record is a `PhaseSeries`; there is nothing here it would gain."
+        )
+    aligned = overlap(list(items.values()))
+    kept = common_support(aligned.series)
+    return DataSet(names=tuple(items), series=tuple(kept), alignment=aligned)

@@ -31,28 +31,43 @@ jointly Gaussian coefficients,
 
     Cov(c_a[i] c_b[i], c_a[j] c_b[j]) = R_aa(k) R_bb(k) + R_ab(k) R_ba(k)
 
-with `k = i - j`. Taking the three correlation *shapes* to be the same --
-they are the same estimator at the same averaging factor, so this is far
-weaker than assuming a noise type -- the double sum collapses onto the
-same `sum rho^2` that defines the EDOF, and
+with `k = i - j`, so summing over the pairs `i, j` of terms,
 
-    Var(cross_var) = (auto_a * auto_b + cross_var^2) / eta
+    Var(cross_var) = (1/M) sum_k (1 - |k|/M) [R_aa(k) R_bb(k)
+                                              + R_ab(k) R_ba(k)]
 
-which is the familiar `2 sigma^4 / eta` when `b` is `a`. So the error bar
-needs no new machinery: `eta` is `eta1` from the coefficients, the
-estimator already validated in `stats/edof.py`, with `eta3` as its usual
-fallback.
+truncated at `4m` lags for the reason `eta1` truncates. All four sequences
+come out of the same FFT the EDOF machinery already uses, so this needs no
+new numerics -- only the observation that the *cross*-correlation of the
+two coefficient arrays is as computable as the auto.
 
-The obvious alternative -- a Bartlett-weighted sum over the *products'*
-own autocovariance, which needs no Gaussian assumption at all -- was
-implemented first and measured against Monte-Carlo scatter at
-0.89 / 0.73 / 0.56 / 0.37 / 0.30 of truth at `m = N/64` through `N/4`, and
-lengthening the lag limit made it worse rather than better. The products
-are heavy-tailed where the coefficients are Gaussian, so their sample
-autocovariance is too noisy to sum over many lags; each extra lag adds
-more noise than signal, and the sum shrinks towards zero. The form above
-holds to about 10% over the same range. `tests/test_cross.py` keeps the
-rejected estimator and measures both, so the finding cannot quietly rot.
+Setting `b = a` collapses it to `2 sigma^4 / eta` with `eta` exactly
+`eta1`: the chi-square error bar is the auto case of this one, not a
+parallel construction. `cross_variance(a, a)` therefore returns the
+auto-variance bit for bit *and* its interval.
+
+**Two estimators were rejected on measurement before this one.**
+
+*A Bartlett-weighted sum over the products' own autocovariance*, which
+needs no Gaussian assumption at all. Measured against Monte-Carlo scatter
+at 0.89 / 0.73 / 0.56 / 0.37 / 0.30 of truth from `m = N/64` to `N/4`, and
+lengthening the lag limit made it worse rather than better, which rules
+out truncation bias. The products are heavy-tailed where the coefficients
+are Gaussian, so each extra lag of their sample autocovariance adds more
+noise than signal and the sum shrinks towards zero.
+
+*The equal-shape closed form* `(auto_a auto_b + cross^2)/eta`, which
+follows from the expression above if `R_aa`, `R_bb` and `R_ab` are taken
+to have the same shape and differ only in scale. Simpler, and right at
+both ends of the tau range -- but measured 0.81 to 0.88 of truth at
+intermediate tau across three seeds, error bars 15-20% too narrow. That is
+exactly where the clock and the instrument contribute comparably and their
+correlation shapes therefore differ most, so the approximation fails in
+the middle rather than at an extreme. `cross_sem` keeps it, because it is
+still the relation that defines the reported `eta`.
+
+`tests/test_cross.py` keeps both and measures all three on the same
+realizations, so none of this can quietly rot.
 
 See theory/cross.md, which also states the assumption that cannot be
 checked from the data: independence of the two channels' noise.
@@ -70,7 +85,78 @@ from ..registry import get
 from ..stats.edof import DEFAULT_LAG_LIMIT, eta1, eta3
 from .align import common_support, overlap
 
-__all__ = ["CrossResult", "cross_variance", "cross_sem"]
+__all__ = ["CrossResult", "cross_variance", "cross_sem", "implied_eta",
+           "lagged_covariance", "isserlis_var", "pair_sem"]
+
+
+def lagged_covariance(coeffs, kmax: int) -> np.ndarray:
+    """`R[i, j, k]`, the biased sample cross-covariance at lags 0..kmax.
+
+        R_ij(k) = (1/M) sum_t c_i[t + k] c_j[t]
+
+    Zero-padded past `2M` so the circular correlation cannot wrap, and
+    divided by `M` rather than `M - k` -- the biased normalization, for the
+    reasons `stats.edof._autocorrelation` gives: it shrinks the noisiest
+    high-lag estimates towards zero and keeps the sequence positive
+    semi-definite. The diagonal `R[i, i]` is exactly that function's input,
+    unnormalized.
+
+    Not demeaned, and that is deliberate rather than an oversight: a second
+    or third difference of phase has zero mean by construction, so
+    subtracting a sample mean would remove signal and add variance.
+
+    Computed one row at a time. The spectra of `M` channels over a long
+    record are already large, and forming the full `M x M` outer product in
+    the frequency domain at once turns "large" into "several times the
+    record". One row is `M` spectra, which is what was already held.
+    """
+    c = np.atleast_2d(np.asarray(coeffs, dtype=np.float64))
+    n_ch, n_terms = c.shape
+    nfft = 1 << int(np.ceil(np.log2(2 * n_terms)))
+    spec = np.fft.rfft(c, nfft, axis=1)
+    out = np.empty((n_ch, n_ch, kmax + 1))
+    for i in range(n_ch):
+        out[i] = np.fft.irfft(spec[i] * np.conj(spec), nfft,
+                              axis=1)[:, : kmax + 1] / n_terms
+    return out
+
+
+def isserlis_var(r: np.ndarray, n_terms: int, pairs) -> float:
+    """Variance of the mean of the pair-averaged products, exactly.
+
+    Given `R = lagged_covariance(...)` and a list of channel pairs, returns
+
+        Var(mean_p mean_t c_ip[t] c_jp[t])
+            = (1/(P^2 M)) sum_{p,q} sum_k (1 - |k|/M)
+              [R_{ip iq}(k) R_{jp jq}(k) + R_{ip jq}(k) R_{jp iq}(k)]
+
+    which is Isserlis' theorem with nothing approximated. Both signs of `k`
+    are covered by the factor of two on `k >= 1`: the summand at `-k` for
+    the ordered pair `(p, q)` equals the summand at `+k` for `(q, p)`, and
+    every ordered pair is visited.
+
+    Multiply by `scale**2` to get the variance of the *variance*; this
+    function works in the coefficients' own units so it does not need to
+    know the estimator.
+
+    One pair `[(0, 1)]` is the two-channel cross-variance; `[(0, 0)]` is the
+    auto case and returns `2 sigma^4 / eta1` exactly. A negative total is
+    possible once the lag sum is truncated, and is returned as such -- the
+    caller decides what to do with it, because "the covariance estimate
+    failed" and "the covariance is zero" are different statements.
+    """
+    kmax = r.shape[2] - 1
+    weights = np.empty(kmax + 1)
+    weights[0] = 1.0
+    weights[1:] = 2.0 * (1.0 - np.arange(1, kmax + 1) / n_terms)
+    i = np.fromiter((p[0] for p in pairs), dtype=int, count=len(pairs))
+    j = np.fromiter((p[1] for p in pairs), dtype=int, count=len(pairs))
+
+    total = 0.0
+    for q in range(i.size):
+        summand = (r[i, i[q]] * r[j, j[q]] + r[i, j[q]] * r[j, i[q]])
+        total += float((summand @ weights).sum())
+    return total / (n_terms * i.size * i.size)
 
 
 @dataclass(frozen=True)
@@ -143,8 +229,8 @@ class CrossResult:
         auto_b` and `sem` tends to `sqrt(auto_a * auto_b / eta)`, whence
         `rejection = 5 * log10(eta)` -- the familiar `5 log10 M` law of
         cross-spectrum measurement, here a consequence rather than a
-        substitute. It is reported from the measured `eta`, so it degrades
-        honestly when the terms overlap or the record is short.
+        substitute. It is reported from the measured error bar, so it
+        degrades honestly when the terms overlap or the record is short.
         """
         with np.errstate(divide="ignore", invalid="ignore"):
             return 10.0 * np.log10(np.sqrt(self.auto_a * self.auto_b) / self.sem)
@@ -155,12 +241,27 @@ def cross_sem(auto_a: float, auto_b: float, cross: float, eta: float) -> float:
 
         sem = sqrt((auto_a * auto_b + cross**2) / eta)
 
-    Finite and positive whatever the sign of `cross`, and equal to
-    `sigma^2 * sqrt(2 / eta)` when the two channels are one channel, which
-    is the auto-variance result `stats/ci.py` is built on. See the module
-    docstring for the derivation and for the estimator this replaced.
+    The equal-shape closed form: what `isserlis_var` reduces to when
+    `R_aa`, `R_bb` and `R_ab` differ only in scale. **Not what
+    `cross_variance` computes** -- it measured 15-20% narrow at
+    intermediate tau, where the clock and the instrument contribute
+    comparably and their shapes therefore differ most.
+
+    It is kept because it is the relation that *defines* the reported
+    `eta`. Inverted, `eta = (auto_a auto_b + cross^2) / sem^2` turns the
+    exact variance back into a degrees-of-freedom number comparable with
+    every other one in the library, which is what a reader wants beside a
+    chi-square interval. Finite and positive whatever the sign of `cross`,
+    and equal to `sigma^2 * sqrt(2 / eta)` when the two channels are one
+    channel.
     """
     return float(np.sqrt((auto_a * auto_b + cross * cross) / eta))
+
+
+def implied_eta(auto_a: float, auto_b: float, cross: float, sem: float) -> float:
+    """`cross_sem` inverted: the degrees of freedom this error bar implies."""
+    return float("inf") if sem <= 0.0 else float(
+        (auto_a * auto_b + cross * cross) / (sem * sem))
 
 
 def cross_variance(a, b, estimator: str = "oadev", taus="octave",
@@ -197,8 +298,9 @@ def cross_variance(a, b, estimator: str = "oadev", taus="octave",
     for i, m in enumerate(ra.af):
         p = ra.coeffs[i] * rb.coeffs[i]
         var[i] = ra.scale * float(p.mean())
-        eta[i], used = _pair_edof(ra, rb, i, int(m), edof_method, lag_limit)
-        sem[i] = cross_sem(ra.var[i], rb.var[i], var[i], eta[i])
+        sem[i], used = pair_sem(ra, rb, i, int(m), var[i], edof_method,
+                                lag_limit)
+        eta[i] = implied_eta(ra.var[i], rb.var[i], var[i], sem[i])
         methods.append(used)
 
     prov = record(
@@ -232,18 +334,26 @@ def cross_variance(a, b, estimator: str = "oadev", taus="octave",
     )
 
 
-def _pair_edof(ra, rb, i: int, m: int, method: str,
-               lag_limit: int) -> tuple[float, str]:
-    """One EDOF for the pair: the geometric mean of the two channels'.
+def pair_sem(ra, rb, i: int, m: int, cross: float, method: str,
+             lag_limit: int) -> tuple[float, str]:
+    """The exact error bar for one pair at one averaging factor.
 
-    Geometric rather than arithmetic because `eta` enters as a divisor of
-    the *product* `auto_a * auto_b`, so it is the product of the two
-    channels' effective counts that the algebra asks for. When the channels
-    are alike the choice does not matter; when they are not, the geometric
-    mean is the one that keeps `sem` equal to the auto-variance answer in
-    the limit `b -> a`.
+    Returns `(sem, method_used)`. The second element exists because
+    "silently fell back" is precisely the decision an ISO-17025 report has
+    to be able to answer for.
 
-    Falls back exactly as `stats.edof.edof` does, and reports which.
+    Two paths, and the choice is the same one `stats.edof.edof` makes. With
+    enough terms, `isserlis_var` over the four lagged covariances, which
+    approximates nothing. Below `MIN_TERMS_FOR_ETA1` the sample covariances
+    are mostly noise and summing them over lags is worse than useless, so
+    it falls back to the equal-shape closed form driven by `eta3` -- a
+    lower bound on the degrees of freedom and therefore an upper bound on
+    the error bar, which is the direction a fallback must err in.
+
+    A truncated lag sum can come out negative, which means the covariance
+    *estimate* failed rather than that the covariance is zero. Rather than
+    report a confident zero, that case takes the conservative path too and
+    says so.
     """
     from ..stats.edof import DATA_DRIVEN_METHODS, MIN_TERMS_FOR_ETA1
 
@@ -254,11 +364,17 @@ def _pair_edof(ra, rb, i: int, m: int, method: str,
             "estimators (greenhall, totvar) are derived for a sum of "
             "squares and do not carry over to a sum of products."
         )
-    n_terms = int(ra.coeffs[i].size)
-    if method == "eta3" or (method == "auto" and n_terms < MIN_TERMS_FOR_ETA1):
-        return eta3(n_terms, m, ra.span_factor), "eta3"
-    return float(np.sqrt(eta1(ra.coeffs[i], m, lag_limit)
-                         * eta1(rb.coeffs[i], m, lag_limit))), "eta1"
+    ca, cb = ra.coeffs[i], rb.coeffs[i]
+    n_terms = int(ca.size)
+    if method != "eta3" and n_terms >= MIN_TERMS_FOR_ETA1:
+        kmax = int(min(lag_limit * m, n_terms - 1))
+        r = lagged_covariance(np.stack((ca, cb)), kmax)
+        total = isserlis_var(r, n_terms, [(0, 1)])
+        if total > 0.0:
+            return ra.scale * float(np.sqrt(total)), "isserlis"
+    eta = float(np.sqrt(eta3(n_terms, m, ra.span_factor)
+                        * eta3(n_terms, m, rb.span_factor)))
+    return cross_sem(ra.var[i], rb.var[i], cross, eta), "eta3"
 
 
 def _check_pairable(ra, rb, estimator: str) -> None:

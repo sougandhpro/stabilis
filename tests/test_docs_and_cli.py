@@ -369,7 +369,7 @@ def test_cli_cross_json_carries_the_error_bar_and_the_assumption(tmp_path, capsy
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "cross_oadev"
     assert len(payload["sem"]) == len(payload["var"]) == len(payload["tau_s"])
-    assert set(payload["edof_method"]) <= {"eta1", "eta3"}
+    assert set(payload["edof_method"]) <= {"isserlis", "eta3"}
     steps = [s["action"] for s in payload["provenance"]["steps"]]
     assert "independence_assumed" in steps
     assert "cross_variance" in steps
@@ -400,3 +400,60 @@ def test_cli_cross_refuses_an_estimator_with_no_cross_form(tmp_path):
     a, b = _two_channel_files(tmp_path, n=512)
     with pytest.raises(SystemExit):
         main(["cross", a, b, "--rate", "1", "--estimator", "mtie"])
+
+
+def test_cli_reject_averages_every_pair_and_names_them(tmp_path, capsys):
+    """Four channels, six pairs, and the warning that matters most here."""
+    import numpy as np
+
+    from stabilis.synth import power_law_phase
+
+    rng = np.random.default_rng(77)
+    clock = power_law_phase(2048, 0, 1.0, rng, 1e-24)
+    paths = []
+    for name in ("ch_a", "ch_b", "ch_c", "ch_d"):
+        p = tmp_path / f"{name}.txt"
+        np.savetxt(p, clock.x + power_law_phase(2048, 2, 1.0, rng, 1e-22).x,
+                   fmt="%.15e")
+        paths.append(str(p))
+    assert main(["reject", *paths, "--rate", "1", "--max-af", "8"]) == 0
+    out = capsys.readouterr().out
+    assert "6 pairs" in out
+    assert "ch_a, ch_b, ch_c, ch_d" in out
+    assert "one instrument" in out, "the common-mode warning must be on the output"
+    body = [ln for ln in out.splitlines()
+            if ln and not ln.startswith("#") and "tau (s)" not in ln]
+    assert len(body) == 4
+    for line in body:
+        one_channel, rejected = (float(v) for v in line.split()[1:3])
+        assert rejected < one_channel
+
+
+def test_cli_reject_on_two_files_equals_cross(tmp_path, capsys):
+    """One pair is the pairwise cross-variance, through the CLI as well."""
+    a, b = _two_channel_files(tmp_path)
+    assert main(["reject", a, b, "--rate", "1", "--max-af", "8", "--json"]) == 0
+    rejected = json.loads(capsys.readouterr().out)
+    assert main(["cross", a, b, "--rate", "1", "--max-af", "8", "--json"]) == 0
+    pair = json.loads(capsys.readouterr().out)
+    assert rejected["n_pairs"] == 1
+    assert rejected["var"] == pair["var"]
+    assert rejected["sem"] == pair["sem"]
+
+
+def test_cli_reject_can_print_the_correlation_matrix(tmp_path, capsys):
+    a, b = _two_channel_files(tmp_path)
+    assert main(["reject", a, b, "--rate", "1", "--max-af", "2",
+                 "--matrix"]) == 0
+    out = capsys.readouterr().out
+    assert "correlation at tau" in out
+    # The diagonal of a correlation matrix is one, by construction, so row
+    # ch_a's first entry and row ch_b's second must both read 1.000.
+    rows = [ln.split() for ln in out.splitlines() if ln.startswith(" ")]
+    # The header row names the columns and carries no numbers; a data row is
+    # a label followed by one value per channel.
+    rows = [r for r in rows if len(r) == 3 and r[0] in ("ch_a", "ch_b")
+            and r[1].replace("-", "").replace(".", "").isdigit()]
+    assert len(rows) >= 2, out
+    for name, *values in rows:
+        assert values[("ch_a", "ch_b").index(name)] == "1.000"

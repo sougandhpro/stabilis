@@ -391,12 +391,17 @@ def test_a_short_record_falls_back_to_eta3_and_says_which():
     rng = np.random.default_rng(19)
     a, b, _ = two_channels(rng, 40)
     cross = cross_variance(a, b, taus="all", max_af=20)
-    assert set(cross.edof_method) <= {"eta1", "eta3"}
-    assert cross.edof_method[0] == "eta1"
+    assert set(cross.edof_method) <= {"isserlis", "eta3"}
+    assert cross.edof_method[0] == "isserlis"
     assert cross.edof_method[-1] == "eta3"
-    # eta3 is a lower bound on the degrees of freedom, so the fallback must
-    # widen the bar rather than narrow it.
-    assert cross.eta[-1] <= cross.n_terms[-1]
+    # The reported eta round-trips the eta3 the fallback actually used --
+    # `implied_eta` is `cross_sem` inverted, so on the fallback path the two
+    # are the same number. eta3 is a lower bound on the degrees of freedom,
+    # so this is the bar being widened rather than narrowed.
+    from stabilis.stats.edof import eta3
+    expected = eta3(int(cross.n_terms[-1]), int(cross.af[-1]), 2)
+    assert cross.eta[-1] == pytest.approx(expected, rel=1e-9)
+    assert expected <= cross.n_terms[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +419,7 @@ def bartlett_sem_on_products(p, m, lag_limit=4):
     about the distribution. It is the obvious thing to do and it is
     optimistic by a factor of three at the long-tau end; see
     `theory/cross.md` and the test below.
-    """
+    """  # noqa: D401
     mm = int(p.size)
     kmax = int(min(lag_limit * m, mm - 1))
     d = p - p.mean()
@@ -426,32 +431,50 @@ def bartlett_sem_on_products(p, m, lag_limit=4):
     return float(np.sqrt(max(total, 0.0) / mm))
 
 
+def equal_shape_sem(ra, rb, i, m, cross):
+    """The other rejected estimator: Isserlis with one correlation shape.
+
+    `(auto_a auto_b + cross**2) / eta`, with `eta` the geometric mean of the
+    two channels'. Exactly what `cross_sem` computes, and what the library
+    used until it was measured at intermediate tau -- where the clock and
+    the instrument contribute comparably, so `R_aa` and `R_ab` have
+    genuinely different shapes and collapsing them onto one is worst.
+    """
+    eta = float(np.sqrt(eta1(ra.coeffs[i], m) * eta1(rb.coeffs[i], m)))
+    return cross_sem(ra.var[i], rb.var[i], cross, eta)
+
+
 def measure_scatter(seed, n, trials, max_af, alpha_clock=0, alpha_inst=2,
                     h_clock=H_CLOCK, h_inst=H_INSTRUMENT):
-    """Monte-Carlo truth for the sem, and the rejected estimator beside it.
+    """Monte-Carlo truth for the sem, and both rejected estimators beside it.
 
-    Returns `(af, ratio_isserlis, ratio_bartlett)`, each ratio being the
-    mean predicted sem over the measured scatter of the estimate. One means
-    the error bar is right; below one means it is too narrow.
+    Returns `(af, ratio_exact, ratio_bartlett, ratio_equal_shape)`, each
+    ratio being the mean predicted sem over the measured scatter of the
+    estimate. One means the error bar is right; below one means it is too
+    narrow. All three are computed on the *same* realizations, so the
+    comparisons are paired.
     """
     rng = np.random.default_rng(seed)
-    var, isserlis, bartlett = [], [], []
+    var, exact, bartlett, equal = [], [], [], []
     for _ in range(trials):
         a, b, _ = two_channels(rng, n, alpha_clock, alpha_inst, h_clock, h_inst)
         cross = cross_variance(a, b, max_af=max_af)
         ra = oadev(a, max_af=max_af)
         rb = oadev(b, max_af=max_af)
         var.append(cross.var)
-        isserlis.append(cross.sem)
+        exact.append(cross.sem)
         bartlett.append([
             ra.scale * bartlett_sem_on_products(ra.coeffs[i] * rb.coeffs[i],
                                                 int(m))
             for i, m in enumerate(ra.af)])
+        equal.append([equal_shape_sem(ra, rb, i, int(m), cross.var[i])
+                      for i, m in enumerate(ra.af)])
         af = cross.af
-    var = np.array(var)
-    scatter = var.std(axis=0, ddof=1)
-    return af, np.array(isserlis).mean(axis=0) / scatter, \
-        np.array(bartlett).mean(axis=0) / scatter
+    scatter = np.array(var).std(axis=0, ddof=1)
+    return (af,
+            np.array(exact).mean(axis=0) / scatter,
+            np.array(bartlett).mean(axis=0) / scatter,
+            np.array(equal).mean(axis=0) / scatter)
 
 
 @pytest.mark.slow
@@ -462,9 +485,9 @@ def test_the_error_bar_is_the_scatter_of_the_estimate():
     determines a standard deviation to about 4%, so a band of +/-20% is
     several times that and still tight enough to catch a factor.
     """
-    af, isserlis, _ = measure_scatter(seed=101, n=1 << 12, trials=300,
+    af, exact, _, _ = measure_scatter(seed=101, n=1 << 12, trials=300,
                                       max_af=256)
-    for m, ratio in zip(af, isserlis):
+    for m, ratio in zip(af, exact):
         assert 0.8 < ratio < 1.25, f"af={m}: sem/scatter = {ratio:.3f}"
 
 
@@ -478,14 +501,34 @@ def test_the_bartlett_estimator_is_optimistic_where_isserlis_is_not():
     because if it were wrong everywhere the interesting finding -- that it
     fails only where the products' tails matter -- would not be the reason.
     """
-    af, isserlis, bartlett = measure_scatter(seed=102, n=1 << 12, trials=300,
-                                             max_af=256)
+    af, exact, bartlett, equal = measure_scatter(seed=102, n=1 << 12,
+                                                 trials=300, max_af=256)
     short, long = af <= 8, af >= 256
     assert np.all(np.abs(bartlett[short] - 1.0) < 0.2)
     assert np.all(bartlett[long] < 0.75), f"bartlett {bartlett}"
-    assert np.all(isserlis[long] > 0.85), f"isserlis {isserlis}"
+    assert np.all(exact[long] > 0.85), f"exact {exact}"
     # The gap opens as tau grows; it is not a constant offset.
-    assert (isserlis - bartlett)[long].min() > (isserlis - bartlett)[short].max()
+    assert (exact - bartlett)[long].min() > (exact - bartlett)[short].max()
+
+
+@pytest.mark.slow
+def test_the_equal_shape_form_is_narrow_where_the_shapes_differ():
+    """The second rejected estimator, and *where* it fails.
+
+    Not at an extreme, which is what makes it interesting: it is fine at
+    short tau (the instrument dominates, one shape) and at long tau (the
+    clock dominates, one shape) and wrong in between, where both contribute
+    and the correlation shapes genuinely differ. That is the signature of
+    the equal-shape approximation failing rather than of a numerical
+    problem, and it is why the exact lag sum replaced it.
+    """
+    af, exact, _, equal = measure_scatter(seed=103, n=1 << 12, trials=300,
+                                          max_af=256)
+    middle = (af >= 8) & (af <= 32)
+    assert np.all(equal[middle] < 0.95), f"equal-shape {equal}"
+    assert np.all(exact[middle] > equal[middle]), f"exact {exact}"
+    # And it is *not* uniformly bad -- at the ends it is close.
+    assert np.all(np.abs(equal[af <= 2] - 1.0) < 0.15)
 
 
 @pytest.mark.slow

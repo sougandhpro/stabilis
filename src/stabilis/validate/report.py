@@ -506,7 +506,71 @@ def _coverage(trials: int) -> list[Check]:
     out.append(_decomposition_round_trip(trials))
     out.append(_bench_hat_round_trip())
     out.append(_cross_sees_under_the_instrument(trials))
+    out.append(_rejection_gain_from_extra_channels(trials))
     return out
+
+
+def _rejection_gain_from_extra_channels(trials: int) -> Check:
+    """Four channels reject deeper than two, by the amount claimed.
+
+    The commercial question this answers is "is a third and fourth channel
+    worth buying", so the number that matters is the *gain* over two, and
+    the honest version of it is bounded above as well as below. Averaging
+    P = 6 pairs would win 5*log10(6) = 3.9 dB if the pairs were
+    independent; they are not, since (c0,c1) and (c0,c2) share a channel,
+    and the exact covariance says how much of that is real.
+
+    Both bounds are scored. A gain that vanished would mean the averaging
+    does nothing; a gain that reached the naive figure would mean the
+    shared-channel terms had been dropped somewhere.
+    """
+    from ..multi import cross_matrix, reject
+
+    rng = np.random.default_rng(SEEDS["coverage"] + 1700)
+    n, rate = 4096, 1.0
+    runs = max(trials // 20, 10)
+    gains, bias, worst_sigma = [], [], 0.0
+    for _ in range(runs):
+        clock = power_law_phase(n, 0, rate, rng, 1.0e-24)
+        ch = {
+            f"c{i}": PhaseSeries(
+                x=clock.x + power_law_phase(n, 2, rate, rng, 1.0e-22).x,
+                rate_hz=rate)
+            for i in range(4)
+        }
+        four = reject(cross_matrix(ch, max_af=8))
+        two = reject(cross_matrix({k: ch[k] for k in ("c0", "c1")}, max_af=8))
+        truth = oadev(clock, max_af=8).var
+        gains.append(four.rejection_db - two.rejection_db)
+        bias.append(four.var / truth - 1.0)
+        worst_sigma = max(worst_sigma,
+                          float(np.max(np.abs(four.var - truth) / four.sem)))
+
+    gain = np.asarray(gains).mean(axis=0)
+    err = np.asarray(bias)
+    mean_bias = float(err.mean())
+    bias_se = float(err.std(ddof=1) / np.sqrt(err.size))
+    naive = 5.0 * np.log10(6.0)
+    ok = (float(gain.min()) > 0.3 and float(gain.max()) < naive
+          and abs(mean_bias) < 4.0 * bias_se and worst_sigma < 4.0)
+    return Check(
+        "coverage", "extra channels reject deeper, by less than naive counting",
+        "One white-FM clock through four white-PM channels, averaged over "
+        "all six pairs, against the same clock through two of them. The "
+        "pairs are not independent -- (c0,c1) and (c0,c2) share a channel -- "
+        "so the exact Isserlis covariance over pairs of pairs is what sets "
+        "the error bar, and the gain it predicts is smaller than treating "
+        "the six as six independent estimates would claim.",
+        f"the averaging gain is positive at every tau and strictly below "
+        f"the naive 5*log10(6) = {naive:.2f} dB; the four-channel estimate "
+        "is unbiased against the clock record within four standard errors "
+        "of the ensemble mean, and every realization inside four of its own "
+        "reported standard errors.",
+        f"gain {gain.min():.2f}-{gain.max():.2f} dB against {naive:.2f} dB "
+        f"naive; bias {mean_bias:+.1%} against {bias_se:.1%} standard error "
+        f"over {runs} realizations; worst miss {worst_sigma:.1f} sigma",
+        ok,
+    )
 
 
 def _cross_sees_under_the_instrument(trials: int) -> Check:
