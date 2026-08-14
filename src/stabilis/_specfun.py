@@ -30,8 +30,11 @@ __all__ = [
     "gammainc_p",
     "gammainc_q",
     "norm_ppf",
+    "norm_cdf",
     "chi2_cdf",
     "chi2_ppf",
+    "digamma",
+    "trigamma",
 ]
 
 _EPS = 3.0e-16
@@ -292,6 +295,110 @@ def _norm_ppf_scalar(p: float) -> float:
 def norm_ppf(p):
     """Quantile of the standard normal distribution."""
     return _apply(_norm_ppf_scalar, p)
+
+
+def norm_cdf(z):
+    """CDF of the standard normal distribution.
+
+        Phi(z) = erfc(-z / sqrt(2)) / 2
+
+    Written with `erfc` rather than `(1 + erf(z/sqrt(2)))/2` because the
+    latter loses every significant digit in the left tail: at z = -10 the
+    answer is 7.6e-24 and `1 + erf(...)` is the difference of two numbers
+    that agree to 23 places. The copula draw in `fit/uncertainty.py` feeds
+    this straight into `chi2_ppf`, where a relative error in a tail
+    probability is a relative error in the resampled variance.
+    """
+    return _apply(lambda zz: 0.5 * math.erfc(-zz / math.sqrt(2.0)), z)
+
+
+# --------------------------------------------------------------------------
+# polygamma
+#
+# These exist for one purpose: the log-space objective in fit/objective.py
+# needs the *exact* first two moments of ln(chi2_nu/nu), which are
+#
+#     E[ln(chi2_nu / nu)]   = digamma(nu/2) - ln(nu/2)
+#     Var[ln(chi2_nu / nu)] = trigamma(nu/2)
+#
+# The usual approximations, 0 and 2/nu, are the leading terms of these and
+# are wrong by -0.58 and by 64% at nu = 2 -- which is where the last point
+# of a stability curve lives. Fitting a log-space model without them biases
+# every long-tau point low, and that is the end of the curve a customer
+# quotes.
+# --------------------------------------------------------------------------
+
+# Threshold above which the asymptotic series is used directly. At x = 10
+# it is accurate to ~1e-16 for both functions; below it the recurrences
+# `psi(x) = psi(x+1) - 1/x` and `psi'(x) = psi'(x+1) + 1/x^2` walk up to it.
+_POLYGAMMA_X0 = 10.0
+
+# Bernoulli-number coefficients of x^-2n in psi(x) ~ ln x - 1/(2x)
+# - sum B_2n / (2n x^2n): 1/12, -1/120, 1/252, -1/240, 1/132.
+_DIGAMMA_ASYMPTOTIC = (
+    -1.0 / 12.0, 1.0 / 120.0, -1.0 / 252.0, 1.0 / 240.0, -1.0 / 132.0,
+)
+
+# ... and of x^-2n in psi'(x) ~ 1/x + 1/(2x^2) + sum B_2n / x^(2n+1),
+# term by term: 1/6, -1/30, 1/42, -1/30, 5/66.
+_TRIGAMMA_ASYMPTOTIC = (
+    1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0,
+)
+
+
+def _digamma_scalar(x: float) -> float:
+    """psi(x) = d/dx lnGamma(x), for x > 0.
+
+        psi(x) ~ ln x - 1/(2x) - sum_n B_2n / (2n x^2n)      (x large)
+        psi(x)  = psi(x + 1) - 1/x                           (recurrence)
+
+    The recurrence is exact, not an approximation, so accuracy is set
+    entirely by where the asymptotic series is entered. Positive argument
+    only: every call site here passes eta/2 with eta >= 1.
+    """
+    if x <= 0.0:
+        raise ValueError(f"digamma: x must be positive, got {x}")
+    shift = 0.0
+    while x < _POLYGAMMA_X0:
+        shift -= 1.0 / x
+        x += 1.0
+    u = 1.0 / (x * x)
+    series = 0.0
+    for c in reversed(_DIGAMMA_ASYMPTOTIC):
+        series = series * u + c
+    return shift + math.log(x) - 0.5 / x + series * u
+
+
+def _trigamma_scalar(x: float) -> float:
+    """psi'(x), the derivative of `digamma`, for x > 0.
+
+        psi'(x) ~ 1/x + 1/(2x^2) + sum_n B_2n / x^(2n+1)     (x large)
+        psi'(x)  = psi'(x + 1) + 1/x^2                       (recurrence)
+
+    Same structure as `_digamma_scalar` and for the same reason. Note the
+    recurrence *adds* here where digamma's subtracts.
+    """
+    if x <= 0.0:
+        raise ValueError(f"trigamma: x must be positive, got {x}")
+    shift = 0.0
+    while x < _POLYGAMMA_X0:
+        shift += 1.0 / (x * x)
+        x += 1.0
+    u = 1.0 / (x * x)
+    series = 0.0
+    for c in reversed(_TRIGAMMA_ASYMPTOTIC):
+        series = series * u + c
+    return shift + (1.0 / x) * (1.0 + 0.5 / x + series * u)
+
+
+def digamma(x):
+    """The digamma function psi(x) = d/dx lnGamma(x), for x > 0."""
+    return _apply(_digamma_scalar, x)
+
+
+def trigamma(x):
+    """The trigamma function psi'(x), for x > 0."""
+    return _apply(_trigamma_scalar, x)
 
 
 # --------------------------------------------------------------------------

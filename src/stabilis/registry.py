@@ -17,14 +17,25 @@ from importlib.metadata import entry_points
 
 __all__ = ["KINDS", "register", "get", "available", "load_plugins"]
 
-KINDS = ("estimator", "reader", "noiseid", "report")
+# "model" holds `fit.models.Model` records rather than bare callables. A
+# model is five things -- the function, its parameter names, a starting
+# guess, a description and which parameters are physically positive -- and
+# a lookup that returned only the function would leave a plugin author
+# unable to supply the other four. The registry is a name-to-thing dict; it
+# does not care which thing.
+KINDS = ("estimator", "reader", "noiseid", "model", "report")
 
 _REGISTRIES: dict[str, dict] = {kind: {} for kind in KINDS}
 _plugins_loaded = False
 
 
 def register(kind: str, name: str):
-    """Decorator registering a callable under `name`. Built-ins use this too."""
+    """Decorator registering a callable -- or a record -- under `name`.
+
+    Built-ins use this too. Estimators, readers and noise identifiers
+    register functions; models register a `Model` dataclass, since a model
+    is more than its function. Nothing here inspects what it stores.
+    """
     if kind not in KINDS:
         raise ValueError(f"unknown plugin kind {kind!r}; expected one of {KINDS}")
 
