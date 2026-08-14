@@ -206,6 +206,41 @@ Everything else with no coefficient alignment — `adev`, the wavelet family,
 the Thêo family, any gapped record — already declines with a stated reason
 rather than guessing, so none of those is debt.
 
+## 7. The fitted uncertainties have no second implementation to differ from
+
+**Status: open, and one half of it can never close — the same shape as
+item 5.**
+
+`fitting/` is validated functionally and the evidence is heavier than usual
+because of it. Two rows in `docs/validation-report.html` measure the thing
+that matters: over 800 realizations of white FM at a known `h_alpha`, the
+stated one-sigma interval contains the true amplitude 0.694 of the time and
+the true slope 0.669, against a nominal 0.6827 with a Monte-Carlo standard
+error of 0.016. The same fits scored against the interval that ignores the
+correlation between τ contain the true slope only 0.525 of the time. The
+deviance is calibrated to its own predicted mean, and the optimizer
+recovers a model-generated curve to 1e-8.
+
+What none of that is: **a comparison against another implementation.**
+Neither Stable32 nor `allantools` fits an arbitrary model to a σ(τ) curve
+at all, and no tool in this field computes the cross-τ covariance, so
+there is no published table and no second implementation to differ from.
+The scipy differential test in `tests/test_fit_models.py` checks that the
+optimizer finds the same *minimum*, which is a check on the search and not
+on the statistics.
+
+That half stays open permanently and is not a defect. The half that could
+close is a **hardware record**: every measurement above uses synthesized
+noise whose truth is known because this library generated it. A fitted
+Gauss–Markov correlation time on a real disciplined oscillator, checked
+against the servo's known time constant, would be the first test where the
+answer was not put in by hand. It arrives with the same data item 5 wants.
+
+Also unmeasured, narrowly: the bootstrap. It agrees with the sandwich to
+within a third of an interval width on a well-specified fit, which is
+tested, but its own coverage has not been scored separately -- the two
+routes are validated as one.
+
 ---
 
 ## Not debt

@@ -391,6 +391,74 @@ def measure_rejection_gain():
     ]
 
 
+FIT_TRIALS = 200
+
+
+def measure_fit():
+    """What a fitted parameter's error bar is worth, measured two ways.
+
+    White FM at a known `h_alpha` has `oadev` variance h0/(2 tau) exactly,
+    so a two-parameter power-law fit has a truth for both parameters and
+    the coverage of its stated interval is a measurable quantity rather
+    than a claim. The same fits are scored a second time against the
+    interval that would be quoted if the taus were treated as independent
+    -- which is what every other tool reports -- so the table is the value
+    of the cross-tau correlation rather than an assertion of it.
+
+    The deviance is reported beside them because it is the other half of
+    the same calibration: an objective whose degrees of freedom are wrong
+    produces intervals that are wrong in the same direction, and reporting
+    only the coverage would leave that unlocated.
+    """
+    from stabilis._specfun import norm_ppf
+    from stabilis.fitting import fit as run_fit
+    from stabilis.stats.ci import ONE_SIGMA
+
+    truth = {"A": 1.0e-22, "b": -1.0}
+    z = float(norm_ppf(0.5 * (1.0 + ONE_SIGMA)))
+    rng = np.random.default_rng(20260814)
+    inside = {"A": 0, "b": 0}
+    naive = {"A": 0, "b": 0}
+    ratios, devs, predicted, dofs, rejected = [], [], [], [], 0
+    for _ in range(FIT_TRIALS):
+        fs = power_law_freq(4096, 0, rate_hz=1.0, rng=rng,
+                            h_alpha=2.0 * truth["A"])
+        got = run_fit(oadev(fs, taus="octave", max_af=256), "powerlaw")
+        for name in ("A", "b"):
+            miss = abs(got.params[name] - truth[name])
+            inside[name] += miss <= z * got.stderr[name]
+            naive[name] += miss <= z * got.stderr_naive[name]
+        ratios.append([got.understatement["A"], got.understatement["b"]])
+        devs.append(got.gof.deviance)
+        predicted.append(got.gof.scale * got.gof.dof)
+        dofs.append(got.gof.dof)
+        rejected += not got.gof.ok
+        n_taus = int(got.tau_s.size)
+    ratios = np.array(ratios)
+    return {
+        "trials": FIT_TRIALS,
+        "level": ONE_SIGMA,
+        "se": float(np.sqrt(ONE_SIGMA * (1.0 - ONE_SIGMA) / FIT_TRIALS)),
+        "rows": [
+            {
+                "name": name,
+                "truth": truth[name],
+                "covered": inside[name] / FIT_TRIALS,
+                "naive": naive[name] / FIT_TRIALS,
+                "ratio": float(ratios[:, i].mean()),
+            }
+            for i, name in enumerate(("A", "b"))
+        ],
+        "deviance": float(np.mean(devs)),
+        "deviance_sem": float(np.std(devs) / np.sqrt(FIT_TRIALS)),
+        "deviance_expected": float(np.mean(predicted)),
+        "dof_effective": float(np.mean(dofs)),
+        "n_taus": n_taus,
+        "dof_naive": n_taus - 2,
+        "rejected": rejected,
+    }
+
+
 def measure_generator():
     """The NBS14 recursion against its published check values."""
     ints = nbs14_1000point_integers(3)
@@ -512,6 +580,7 @@ def build_html():
     gaps = measure_gap_handling()
     crossing = measure_cross_rejection()
     gains = measure_rejection_gain()
+    fitting = measure_fit()
     tests = run_tests()
     git = git_state()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -527,7 +596,10 @@ parity with Stable32; the exact non-negative least squares core and the
 power-law decomposition built on it; TOTVAR, the Thêo family and the MODWT
 wavelet variance. M5 is complete ahead of its place in the sequence, being
 the part with no equivalent in any other tool: the bench model, the
-cross-variance, and multi-channel noise rejection.</p>
+cross-variance, and multi-channel noise rejection. M4's fitting layer has
+since landed on the same principle — the covariance <em>between</em> τ is
+measured rather than assumed away, so a fitted parameter's uncertainty is
+the one it actually has.</p>
 <div class="meta">
 generated {esc(now)} &nbsp;·&nbsp; stabilis {esc(stabilis.__version__)} &nbsp;·&nbsp;
 numpy {esc(np.__version__)} &nbsp;·&nbsp; python {esc(platform.python_version())}<br>
@@ -889,6 +961,70 @@ whole curve and be wrong at both ends of it — overselling the hardware at long
 mistake.</div>"""
     )
 
+    parts.append(
+        """<h2>Fitting a model, and what the correlation between τ is worth</h2>
+<p>Two properties make this more than calling a curve fitter. The sampling law
+of a stability estimate is <strong>χ², not Gaussian</strong>, and least Gaussian
+at long τ where the specification lives; and the points of an overlapping
+estimator are <strong>correlated</strong>, because they are computed from the
+same phase samples. The first is handled by minimizing the exact likelihood —
+which turns out to be a sum of squares anyway, so an ordinary least-squares
+optimizer reaches it with no Gaussian approximation. The second is handled by
+measuring the covariance <em>between</em> τ from the coefficient arrays every
+estimator already returns, and carrying it through a sandwich estimator.</p>
+<p>Ignoring the correlation leaves the parameters roughly unbiased and their
+<strong>uncertainties too narrow</strong> — the one failure mode that survives
+review, because the fitted value and the residuals both look fine. Measured at
+generation time over TRIALS realizations of white FM at a known h₀, N = 4096,
+where the truth of both fitted parameters is known exactly:</p>""".replace(
+            "TRIALS", str(FIT_TRIALS))
+    )
+    parts.append(
+        table(
+            ["parameter", "truth", "coverage, correlated",
+             "coverage, ignoring it", "error-bar ratio"],
+            [
+                (
+                    r["name"],
+                    f"{r['truth']:g}",
+                    f"{r['covered']:.3f}",
+                    f"{r['naive']:.3f}",
+                    f"{r['ratio']:.2f}×",
+                )
+                for r in fitting["rows"]
+            ],
+            numeric=(1, 2, 3, 4),
+        )
+    )
+    parts.append(
+        f"""<div class="note"><strong>Nominal coverage is
+{fitting['level']:.4f} and the Monte-Carlo standard error is
+{fitting['se']:.3f}.</strong> The correlation-aware interval sits on nominal;
+the interval that treats the τ as independent — which is what every other tool
+reports — misses it by several standard errors, in the direction that
+overstates confidence. The error-bar ratio is that shortfall seen the other way
+round.
+<p>The deviance is the other half of the same calibration, and it is reported
+because an objective whose degrees of freedom are wrong produces intervals that
+are wrong in the same direction. Measured mean
+{fitting['deviance']:.2f} ± {fitting['deviance_sem']:.2f} against a predicted
+{fitting['deviance_expected']:.2f}, on {fitting['dof_effective']:.1f} effective
+degrees of freedom rather than the {fitting['dof_naive']} a parameter count
+would give — {fitting['n_taus']} τ, two of them fitted, and the rest spent on
+the correlation. Getting that correction wrong is not academic: on a longer
+record during development, the obvious version — which assumes the fit absorbs
+<em>p</em> dimensions — predicted 8.0 where the measurement was 5.8 ± 0.4, five
+standard errors out and in the direction that makes a correct fit look
+suspiciously good. What the fit actually absorbs is tr(HP), and with correlated
+points the model lies along the directions where P carries its mass.
+{fitting['rejected']} of {fitting['trials']} fits were flagged as poor by the
+goodness-of-fit test; all of them are still scored above, since dropping them
+would be selecting on the outcome being measured.</p>
+<p>Neither number is available from a parameter count, and neither is
+available at all without the cross-τ covariance — which no other tool in this
+field computes.</p></div>"""
+    )
+
     parts.append("<h2>Design decisions worth recording</h2>")
     parts.append(
         """
@@ -1065,6 +1201,19 @@ therefore runs towards passing exactly where the evidence is thinnest. Three
 rules follow and each is a test: a limit is never interpolated between the taus
 a datasheet states, no interval means no verdict, and a two-source pass is
 conclusive while a failure is not attributable.</li>
+<li><strong>Model fitting under the χ² likelihood</strong>, with the
+correlation between τ measured rather than assumed away. Arbitrary models —
+a Gauss–Markov correlation time, a servo bump, a quantization floor, or a
+customer's own — fitted against the exact sampling law rather than by least
+squares, which is the wrong objective for a distribution running from
+0.55σ to 2.2σ. Two independently derived uncertainties come back: a
+correlation-aware sandwich and a copula bootstrap that keeps both the χ²
+margins and the measured correlation. They agree when the model is right and
+disagree when it is not, which is why both are printed. And the fit
+<strong>refuses to quote parameters</strong> whose deviance is outside what
+its effective degrees of freedom admit — in either direction, since a fit
+that is too good means the model has more freedom than the curve
+constrains.</li>
 </ul>
 
 <h3>Next</h3>
@@ -1075,12 +1224,12 @@ no longer "implements the published algorithm" but "matches Stable32 to the
 precision it prints". Still to come: the public NBS suites and, most valuable
 of all, a real oscillator record, being the only case where the data was not
 generated by the tool under test.</li>
-<li><strong>M4–M8</strong> — instrument readers, which are gated on paired
-vendor exports rather than on effort: a binary format with no public
-specification can only be accepted if the same capture is also available as
-vendor ASCII to check the reader against. Then model fitting against the χ²
-likelihood, realtime ingest with attributed time tagging, and dynamic Allan
-variance.</li>
+<li><strong>M4–M8</strong> — the rest of M4 is export and instrument readers,
+the readers gated on paired vendor exports rather than on effort: a binary
+format with no public specification can only be accepted if the same capture
+is also available as vendor ASCII to check the reader against. Then power
+spectra and masks, realtime ingest with attributed time tagging, and dynamic
+Allan variance.</li>
 </ul>
 
 <div class="note"><strong>Known limitations.</strong> Confidence intervals now

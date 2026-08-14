@@ -132,6 +132,19 @@ legitimately be quoted. Since then:
   The Haar case returns the overlapping Allan variance *and* its error
   bar, which is a cross-check of two independent code paths rather than a
   special case.
+- **Model fitting under the χ² likelihood**, with the correlation *between*
+  τ measured rather than assumed away. The exact likelihood turns out to be
+  a sum of squares, so Levenberg–Marquardt minimizes it with no Gaussian
+  approximation; the covariance between τ comes from the same coefficient
+  arrays through Isserlis' theorem, and a sandwich estimator carries it
+  into the parameter uncertainties. Ignoring it leaves the parameters
+  roughly unbiased and their error bars a quarter to a third too narrow —
+  measured, in `docs/validation-report.html`, as a slope interval that
+  covers 0.53 of the time against a nominal 0.68, where the
+  correlation-aware one covers 0.67. Built-in models include a
+  Gauss–Markov *knee*, which is a correlation time no power-law fit can
+  produce. The fit refuses to quote parameters whose deviance is outside
+  what its effective degrees of freedom admit, in either direction.
 - **The measurement report** — see below.
 - **Plots** — σ(τ) with asymmetric error bars, power-law slope guides,
   phase, frequency, and the bench solution.
@@ -177,8 +190,8 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — `fit.py`, model fitting against the χ² likelihood. Instrument
-readers wait on paired vendor exports.
+**Next** — export, then power spectra and masks. Instrument readers wait on
+paired vendor exports.
 
 ## Cross-variances
 

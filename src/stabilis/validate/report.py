@@ -507,7 +507,114 @@ def _coverage(trials: int) -> list[Check]:
     out.append(_bench_hat_round_trip())
     out.append(_cross_sees_under_the_instrument(trials))
     out.append(_rejection_gain_from_extra_channels(trials))
+    out.extend(_fitted_parameter_coverage(trials))
     return out
+
+
+def _fitted_parameter_coverage(trials: int) -> list[Check]:
+    """Fit a known curve many times; do the stated intervals contain it?
+
+    Two claims scored on one ensemble, because they are the same
+    measurement read twice.
+
+    **The M4 pass criterion**: a maximum-likelihood fit recovers a known
+    parameter from synthesized noise within its stated uncertainty. White FM
+    at a known `h_alpha` has `oadev` variance `h0/(2 tau)` exactly, so both
+    fitted parameters have a truth to be scored against and no reference
+    table is involved.
+
+    **What the cross-tau correlation is worth**, which is the claim no
+    competing tool can make: the same intervals recomputed with the
+    correlation deleted under-cover, and by how much. That number is the
+    argument for `stats/taucov.py` existing, and stating it as a measured
+    coverage rather than as a ratio of error bars is what makes it evidence.
+
+    Scored on the *slope*, not on the amplitude. Both are fitted, but the
+    slope is the parameter a customer reads off a specification -- "is this
+    oscillator white-FM limited out to a day" -- and it is where the
+    correlation bites hardest, since a coherent tilt of the whole curve is
+    exactly what correlated points produce.
+    """
+    from ..fitting import fit as run_fit
+    from .._specfun import norm_ppf
+
+    reps = max(trials, MIN_COVERAGE_TRIALS)
+    truth = {"A": 1.0e-22, "b": -1.0}
+    h_alpha = 2.0 * truth["A"]
+    level = ONE_SIGMA
+    z = float(norm_ppf(0.5 * (1.0 + level)))
+
+    rng = np.random.default_rng(SEEDS["coverage"] + 900)
+    inside = {"A": 0, "b": 0}
+    inside_naive = {"A": 0, "b": 0}
+    ratios, failures = [], 0
+    for _ in range(reps):
+        fs = power_law_freq(4096, 0, rate_hz=1.0, rng=rng, h_alpha=h_alpha)
+        got = run_fit(oadev(fs, taus="octave", max_af=256), "powerlaw")
+        if not got.converged:
+            failures += 1
+            continue
+        for name in ("A", "b"):
+            miss = abs(got.params[name] - truth[name])
+            inside[name] += miss <= z * got.stderr[name]
+            inside_naive[name] += miss <= z * got.stderr_naive[name]
+        ratios.append(got.understatement["b"])
+
+    scored = reps - failures
+    se = float(np.sqrt(level * (1.0 - level) / scored))
+    # Four Monte-Carlo standard errors and no systematic allowance, unlike
+    # the per-point coverage row above. That row needs one because the EDOF
+    # estimator itself strays at the last octave; this one was measured at
+    # 1500 trials and came back at +0.50 and -1.00 standard errors, so
+    # there is nothing to allow for -- and adding an allowance anyway would
+    # have made the row unable to fail. Deleting the correlation moves the
+    # slope's coverage by 5.8 standard errors, which this band catches and
+    # a wider one did not.
+    band = 4.0 * se
+    measured = {k: inside[k] / scored for k in inside}
+    naive_b = inside_naive["b"] / scored
+
+    covered = Check(
+        "coverage", "a maximum-likelihood fit recovers a known parameter",
+        "White FM synthesized at a known IEEE 1139 coefficient has "
+        "`oadev` variance h0/(2 tau) exactly, so a two-parameter power-law "
+        "fit has a truth for both its amplitude and its slope. Scored as "
+        f"containment of that truth by the stated interval over {scored} "
+        "realizations at N=4096 -- the whole chain, from the calibrated "
+        "synthesizer through the estimator, the degrees of freedom, the "
+        "cross-tau covariance and the chi-square likelihood, back to the "
+        "number that went in. Every converged fit is scored, including the "
+        "ones whose goodness of fit came out poor: dropping those would be "
+        "selecting on the outcome being measured.",
+        f"both parameters contained {level:.4f} of the time, within "
+        f"{band:.3f} (four Monte-Carlo standard errors)",
+        "; ".join(f"{k} {v:.3f}" for k, v in measured.items())
+        + (f"; {failures} fits did not converge" if failures else ""),
+        all(abs(v - level) <= band for v in measured.values()),
+    )
+
+    # Two conditions, not one. "The naive interval under-covers" is only
+    # evidence for this machinery if the corrected interval does *not* --
+    # otherwise a run in which both were broken in the same way would pass
+    # while proving nothing.
+    margin = 3.0 * se
+    deficit = Check(
+        "coverage", "ignoring the cross-tau correlation under-covers",
+        "The same fits, with the same fitted values, scored against the "
+        "interval that would be quoted if the taus were treated as "
+        "independent -- which is what every other tool reports. The points "
+        "of an overlapping estimator come from the same phase samples, so "
+        "that interval is too narrow, and this measures by how much rather "
+        "than asserting it.",
+        f"the uncorrelated interval contains the true slope less than "
+        f"{level - margin:.3f} of the time, and the correlation-aware one "
+        f"is within {band:.3f} of {level:.4f}",
+        f"slope containment {naive_b:.3f} uncorrelated against "
+        f"{measured['b']:.3f} corrected; mean error-bar ratio "
+        f"{float(np.mean(ratios)):.2f}",
+        naive_b < level - margin and abs(measured["b"] - level) <= band,
+    )
+    return [covered, deficit]
 
 
 def _rejection_gain_from_extra_channels(trials: int) -> Check:

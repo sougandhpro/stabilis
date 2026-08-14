@@ -457,3 +457,120 @@ def test_cli_reject_can_print_the_correlation_matrix(tmp_path, capsys):
     assert len(rows) >= 2, out
     for name, *values in rows:
         assert values[("ch_a", "ch_b").index(name)] == "1.000"
+
+
+def _white_fm_file(tmp_path, n=8192, seed=11, h_alpha=2e-22):
+    """A frequency record of known white-FM level: oadev var = h0/(2 tau)."""
+    import numpy as np
+
+    from stabilis.synth import power_law_freq
+
+    rng = np.random.default_rng(seed)
+    p = tmp_path / "wfm.txt"
+    np.savetxt(p, power_law_freq(n, 0, rate_hz=1.0, rng=rng,
+                                 h_alpha=h_alpha).y, fmt="%.15e")
+    return str(p)
+
+
+def _fit_args(path, *extra):
+    return ["fit", path, "--kind", "frequency", "--rate", "1",
+            "--max-af", "256", *extra]
+
+
+def test_cli_fit_prints_both_error_bars_and_their_ratio(tmp_path, capsys):
+    """The correlated and the uncorrelated one, side by side.
+
+    Printing only the corrected number would leave a reader unable to tell
+    what the correction was worth; the ratio is the whole argument for the
+    machinery behind it.
+    """
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path)) == 0
+    out = capsys.readouterr().out
+    assert "uncorrelated" in out and "ratio" in out
+    assert "cross-tau correlation measured" in out
+    rows = {ln.split()[0]: ln.split() for ln in out.splitlines()
+            if ln[:1].isalpha() and len(ln.split()) == 5}
+    assert set(rows) == {"A", "b"}
+    # White FM: sigma2 = h0/(2 tau), so A = 1e-22 and b = -1.
+    assert float(rows["A"][1]) == pytest.approx(1e-22, rel=0.1)
+    assert float(rows["b"][1]) == pytest.approx(-1.0, abs=0.1)
+    assert float(rows["A"][4]) > 1.0 and float(rows["b"][4]) > 1.0
+
+
+def test_cli_fit_refuses_to_print_a_model_that_does_not_describe_the_data(
+        tmp_path, capsys):
+    """White FM is not a tau^-2 quantization floor, and the exit code says so."""
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path, "--model", "quantization")) == 1
+    out = capsys.readouterr().out
+    assert "REFUSING TO PRINT PARAMETERS" in out
+    assert "does not describe this curve" in out
+    assert "sigma_x" not in out
+
+
+def test_cli_fit_warns_when_the_correlation_could_not_be_measured(
+        tmp_path, capsys):
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path, "--estimator", "adev")) == 0
+    out = capsys.readouterr().out
+    assert "treated as independent" in out
+    assert "lower bound" in out
+
+
+def test_cli_fit_bootstrap_prints_a_second_interval(tmp_path, capsys):
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path, "--bootstrap", "40", "--seed", "2")) == 0
+    out = capsys.readouterr().out
+    assert "bootstrap [" in out
+    assert "40 bootstrap refits" in out
+
+
+def test_cli_fit_can_freeze_a_parameter(tmp_path, capsys):
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path, "--freeze", "b=-1", "--json")) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["frozen"] == {"b": -1.0}
+    assert payload["free"] == ["A"]
+    assert "b" not in payload["stderr"]
+
+
+def test_cli_fit_rejects_a_malformed_freeze_without_a_traceback(tmp_path, capsys):
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path, "--freeze", "b")) == 1
+    assert "NAME=VALUE" in capsys.readouterr().err
+    assert main(_fit_args(path, "--freeze", "b=fast")) == 1
+    assert "not a number" in capsys.readouterr().err
+
+
+def test_cli_fit_names_the_models_when_asked_for_one_that_does_not_exist(
+        tmp_path, capsys):
+    path = _white_fm_file(tmp_path, n=1024)
+    assert main(_fit_args(path, "--model", "phlogiston")) == 1
+    err = capsys.readouterr().err
+    assert "gauss_markov" in err and "quantization" in err
+
+
+def test_cli_fit_json_carries_the_evidence_and_the_provenance(tmp_path, capsys):
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path, "--json")) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["correlation"] == "isserlis"
+    assert payload["objective"] == "ml"
+    assert payload["understatement"]["b"] > 1.0
+    assert len(payload["tau_s"]) == len(payload["fitted"]) == len(payload["edof"])
+    steps = [s["action"] for s in payload["provenance"]["steps"]]
+    assert "evaluate" in steps and "tau_covariance" in steps and "fit" in steps
+
+
+def test_cli_fit_json_exit_status_is_the_verdict(tmp_path, capsys):
+    """A pipeline reading the JSON should not have to parse `gof_ok` itself."""
+    path = _white_fm_file(tmp_path)
+    assert main(_fit_args(path, "--model", "quantization", "--json")) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["gof_ok"] is False
+    # The parameters are still in the JSON: a machine reader can see what
+    # was rejected, which the human table deliberately does not show.
+    assert "sigma_x" in payload["params"]
