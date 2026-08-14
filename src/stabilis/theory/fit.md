@@ -181,6 +181,16 @@ number a customer wants out of a disciplined oscillator or a
 temperature-driven ageing loop. The small-ρ branch is evaluated by series
 because the bracket's leading four orders cancel exactly.
 
+One caveat that catches people simulating test data: **`y` is the average
+over each τ₀, not a point sample.** That is what a counter with a gate time
+produces, so the formula is right for real measurements. A simulated AR(1)
+sequence of point samples is a different process at short τ — its exact
+Allan variance is 50 % above this at m = 1, 3 % at m = 4, and within 1e-4 by
+m = 64 — so a fit to simulated point samples across the whole grid is
+correctly *rejected*. That is the data disagreeing with the model, and the
+closed form is separately checked against direct numerical integration of
+`R(t)` to 1e-6.
+
 The others: `powerlaw` (`A·τ^b`), `drift` (`D²τ²/2`, bit-exact against
 `powerlaw_coeffs.drift_coeff`), `quantization` (`3σ_x²/τ²`, parameterized
 in the time error so a fitted `σ_x` compares directly with a datasheet's

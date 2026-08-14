@@ -171,6 +171,15 @@ def _gauss_markov(tau, p) -> np.ndarray:
     is the one number a customer wants from a disciplined oscillator or a
     temperature-driven ageing loop, and no power-law fit can produce it.
 
+    **`y` here is the average over each tau0, not a point sample.** That is
+    what a counter with a gate time produces, so it is right for real data
+    -- but a *simulated* AR(1) sequence of point samples is a different
+    process at short tau, and its exact Allan variance sits 50% above this
+    at m=1, 3% at m=4, and within 1e-4 by m=64. Fitting simulated point
+    samples across the whole grid is correctly rejected by the goodness of
+    fit. See tests/test_fit_models.py, which pins both the closed form and
+    the departure.
+
     The small-rho branch uses the series `2*rho**3/3 - rho**4/2 + ...`: the
     bracket is a difference of terms each of order 1 whose leading four
     orders cancel exactly, so evaluating it directly at rho = 1e-4 leaves

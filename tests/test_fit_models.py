@@ -598,3 +598,78 @@ def test_differential_against_scipy_least_squares():
         to_bounded(theirs.x[0], 0.0, None), rel=1e-6)
     assert to_bounded(mine.z[1], 0.0, None) == pytest.approx(
         to_bounded(theirs.x[1], 0.0, None), rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# the Gauss-Markov closed form, against two independent routes
+# ---------------------------------------------------------------------------
+
+
+def _avar_ou_numeric(tau, t_corr, npt=2001):
+    """AVAR of an OU process by direct double integration of its covariance.
+
+    sigma2 = Var(ybar) - Cov(ybar_0, ybar_1), each a trapezoidal quadrature
+    of R(t) = exp(-|t|/T) over the averaging windows. Slow, obviously
+    correct, and sharing no algebra with the closed form it checks.
+    """
+    t = np.linspace(0.0, tau, npt)
+    w = np.ones(npt)
+    w[0] = w[-1] = 0.5
+    w /= npt - 1
+    r = lambda d: np.exp(-np.abs(d) / t_corr)  # noqa: E731
+    var = float(w @ r(t[:, None] - t[None, :]) @ w)
+    cov = float(w @ r(t[:, None] + tau - t[None, :]) @ w)
+    return var - cov
+
+
+@pytest.mark.parametrize("tau", [0.05, 0.3, 1.0, 3.0, 10.0])
+def test_gauss_markov_matches_direct_integration_of_its_covariance(tau):
+    """The closed form against a quadrature that shares none of its algebra."""
+    got = GAUSS_MARKOV.variance(np.array([tau]), {"sigma_y": 1.0, "T": 1.0})[0]
+    # The tolerance is the quadrature's, not the closed form's: at tau = 10 T
+    # a 2001-point trapezoid over a covariance falling by e^-10 leaves about
+    # 2e-6. Refining the grid tightens it; the closed form does not move.
+    assert got == pytest.approx(_avar_ou_numeric(tau, 1.0), rel=1e-5)
+
+
+def _avar_ar1_exact(m, a):
+    """Exact AVAR of a discrete AR(1) *point-sample* sequence, R[k] = a^|k|.
+
+        Var(ybar)        = (m + 2 sum_{k<m} (m-k) a^k) / m^2
+        Cov(ybar_0, ybar_m) = sum_{|d|<m} (m-|d|) a^(m+d) / m^2
+    """
+    k = np.arange(1, m)
+    var = (m + 2.0 * np.sum((m - k) * a**k)) / m**2
+    d = np.arange(-(m - 1), m)
+    cov = float(np.sum((m - np.abs(d)) * a ** (m + d))) / m**2
+    return var - cov
+
+
+def test_a_sampled_ar1_converges_to_the_continuous_model_but_not_at_m_equals_one():
+    """The caveat a user fitting real data has to know about.
+
+    The model is the AVAR of a *continuous* OU process averaged over each
+    tau -- which is what a counter with a gate time produces. A simulated
+    AR(1) of point samples is not that: at m = 1 its exact AVAR is 50%
+    above the model, falling to 3% at m = 4 and below 1e-4 by m = 64. So a
+    fit to simulated point samples across the whole tau grid is correctly
+    *rejected*, and that is the data disagreeing with the model rather than
+    the model being wrong -- which the test above establishes separately.
+    """
+    t_corr = 300.0
+    a = float(np.exp(-1.0 / t_corr))
+    ratios = {}
+    for m in (1, 4, 16, 64, 1024):
+        model = GAUSS_MARKOV.variance(np.array([float(m)]),
+                                      {"sigma_y": 1.0, "T": t_corr})[0]
+        ratios[m] = _avar_ar1_exact(m, a) / model
+
+    assert ratios[1] == pytest.approx(1.5013, rel=1e-3)
+    assert ratios[4] == pytest.approx(1.032, rel=1e-2)
+    assert abs(ratios[16] - 1.0) < 3e-3
+    assert abs(ratios[64] - 1.0) < 2e-4
+    assert abs(ratios[1024] - 1.0) < 5e-6
+    # Monotone convergence, which is the actual claim: the departure is a
+    # short-tau artefact of point sampling and not an offset.
+    departures = [abs(ratios[m] - 1.0) for m in (1, 4, 16, 64, 1024)]
+    assert departures == sorted(departures, reverse=True)
