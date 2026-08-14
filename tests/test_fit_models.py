@@ -14,14 +14,14 @@ import numpy as np
 import pytest
 
 from stabilis._specfun import digamma, norm_cdf, trigamma
-from stabilis.fit.lm import (
+from stabilis.fitting.lm import (
     dtheta_dz,
     levenberg_marquardt,
     numeric_jacobian,
     to_bounded,
     to_free,
 )
-from stabilis.fit.models import (
+from stabilis.fitting.models import (
     BUMP,
     DRIFT,
     GAUSS_MARKOV,
@@ -32,7 +32,7 @@ from stabilis.fit.models import (
     model,
     sum_of,
 )
-from stabilis.fit.objective import (
+from stabilis.fitting.objective import (
     GOF_BAND,
     OBJECTIVES,
     deviance,
@@ -372,10 +372,18 @@ def test_logspace_refuses_a_negative_measurement_and_says_why():
 # ---------------------------------------------------------------------------
 
 
+def _projector(n, p, seed=0):
+    """A rank-p orthogonal projector, standing in for a fit's hat matrix."""
+    rng = np.random.default_rng(seed)
+    q, _ = np.linalg.qr(rng.standard_normal((n, p)))
+    return q @ q.T
+
+
 def test_independent_points_give_the_naive_degrees_of_freedom_exactly():
-    gof = goodness_of_fit(10.0, 14, 2, corr=np.eye(14))
-    assert gof.dof == pytest.approx(12.0, rel=1e-14)
-    assert gof.scale == pytest.approx(1.0, rel=1e-14)
+    """With P = I any rank-p projector must return to `scale = 1`, `n - p`."""
+    gof = goodness_of_fit(10.0, 14, 2, corr=np.eye(14), hat=_projector(14, 2))
+    assert gof.dof == pytest.approx(12.0, rel=1e-12)
+    assert gof.scale == pytest.approx(1.0, rel=1e-12)
     assert goodness_of_fit(10.0, 14, 2).dof == 12.0
 
 
@@ -383,11 +391,19 @@ def test_correlation_widens_the_band_rather_than_moving_the_deviance():
     """Satterthwaite: correlated points make the deviance more variable."""
     n = 14
     corr = 0.5 ** np.abs(np.subtract.outer(np.arange(n), np.arange(n)))
-    gof = goodness_of_fit(12.0, n, 2, corr=corr)
+    gof = goodness_of_fit(12.0, n, 2, corr=corr, hat=_projector(n, 2))
     assert gof.deviance == 12.0
     assert gof.scale > 1.0
     assert gof.dof < 12.0
     assert "effective degrees of freedom" in gof.note
+
+
+def test_the_correlation_and_the_projector_are_required_together():
+    """Half the correction is the mistake it exists to prevent."""
+    with pytest.raises(ValueError, match="go together"):
+        goodness_of_fit(12.0, 14, 2, corr=np.eye(14))
+    with pytest.raises(ValueError, match="go together"):
+        goodness_of_fit(12.0, 14, 2, hat=_projector(14, 2))
 
 
 def test_a_hopeless_fit_is_flagged_and_says_which_way():

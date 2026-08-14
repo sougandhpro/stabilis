@@ -12,6 +12,12 @@ submodule something lives in. That is a promise: **the names in `__all__`
 below are the public API** and will not move without a version bump, while
 anything reached through a submodule path may.
 
+`fit` is the function, `stabilis.fitting` is the package it lives in. The
+package is not called `fit` precisely so that the two never collide: a
+top-level name that shadows a submodule makes `import stabilis.fit` and
+`from stabilis.fit import ...` mean different things, which is the sort of
+ambiguity that costs somebody an afternoon.
+
 Three subsystems are deliberately *not* re-exported, and their absence is
 the documentation:
 
@@ -80,6 +86,7 @@ from .multi import (  # noqa: E402
     overlap,
     reject,
 )
+from .fitting import FitResult, fit  # noqa: E402
 from .synth import power_law_freq, power_law_phase  # noqa: E402
 
 __all__ = [
@@ -116,6 +123,8 @@ __all__ = [
     "ONE_SIGMA",
     "TWO_SIGMA",
     # analysis
+    "fit",
+    "FitResult",
     "decompose",
     "identify",
     "identify_curve",

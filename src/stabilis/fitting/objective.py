@@ -185,26 +185,36 @@ class GoodnessOfFit:
 
 
 def goodness_of_fit(
-    dev: float, n_points: int, n_params: int, corr=None
+    dev: float, n_points: int, n_params: int, corr=None, hat=None
 ) -> GoodnessOfFit:
     """The deviance read against the distribution it actually has.
 
-    With independent points `D ~ chi2(n - p)`. The points of an
-    overlapping estimator are not independent, and the correction is
-    Satterthwaite's: near the optimum `D` is a quadratic form in correlated
-    standard normals, so
+    With independent points `D ~ chi2(n - p)`. The points of an overlapping
+    estimator are not independent, and the correction is Satterthwaite's.
+    Near the optimum the fitted residual is `(I - H) r` with `H` the hat
+    matrix of the residual Jacobian, and `r` has covariance `P`, the
+    measured correlation matrix -- exactly, because `taucov` imposes a
+    diagonal that leaves each residual unit-variance. So `D` is a quadratic
+    form in correlated normals with
 
-        E[D] = n - p,     Var[D] = 2 * tr(P @ P) * (n - p) / n
+        M = (I - H) P,    E[D] = tr(M),    Var[D] = 2 tr(M @ M)
 
-    with `P` the correlation matrix. Matching those two moments to
-    `scale * chi2(dof)` gives
+    and matching those two moments to `scale * chi2(dof)` gives
 
-        scale = tr(P @ P) / n,     dof = n * (n - p) / tr(P @ P)
+        scale = tr(M @ M) / tr(M),    dof = tr(M)**2 / tr(M @ M)
 
-    which reduces to `scale = 1`, `dof = n - p` exactly when `P = I`. The
-    correlation does not move the deviance much; it widens the
-    distribution the deviance should be read against, so a naive chi-square
-    band would reject good fits.
+    At `P = I` that is `scale = 1`, `dof = n - p`, exactly.
+
+    **The projector cannot be summarized as "p dimensions".** Fitting
+    removes `tr(H P)`, not `p`, and when the points are correlated the
+    model lies along the smooth directions where `P` carries most of its
+    mass, so `tr(H P)` runs to several times `p`. Assuming otherwise
+    predicted a mean deviance of 8.0 for a two-parameter fit to ten
+    correlated octave taus where the measured mean was 5.8 +/- 0.4 -- five
+    standard errors out, and in the direction that makes a correct fit look
+    suspiciously good. `corr` and `hat` are therefore required together:
+    there is no defensible way to use one without the other, and offering
+    a `corr`-only path would only offer that mistake back.
 
     `ok` is False on both tails. Too large is the familiar case -- the
     model does not describe the data. Too small means the model has more
@@ -212,6 +222,12 @@ def goodness_of_fit(
     it are over-estimated; either way the parameters are not defensible and
     the caller should say so instead of printing them.
     """
+    if (corr is None) != (hat is None):
+        raise ValueError(
+            "goodness_of_fit: `corr` and `hat` go together. The correlation "
+            "alone cannot say how much of the deviance the fit absorbed, and "
+            "assuming it absorbed `p` is the error this argument exists to "
+            "avoid")
     n = int(n_points)
     dof = float(n - int(n_params))
     if dof <= 0.0:
@@ -224,14 +240,18 @@ def goodness_of_fit(
 
     scale, note = 1.0, ""
     if corr is not None:
-        p = np.asarray(corr, dtype=np.float64)
-        trace = float(np.sum(p * p.T))
-        scale = trace / n
-        dof = n * dof / trace
-        if scale > 1.05:
-            note = (f"the taus are correlated, so the deviance is read "
-                    f"against {dof:.1f} effective degrees of freedom rather "
-                    f"than {n - int(n_params)}")
+        m = (np.eye(n) - np.asarray(hat, dtype=np.float64)) @ np.asarray(
+            corr, dtype=np.float64)
+        tr1, tr2 = float(np.trace(m)), float(np.trace(m @ m))
+        if tr1 <= 0.0 or tr2 <= 0.0:
+            note = ("the correlation left no positive effective degrees of "
+                    "freedom, so the deviance is read naively")
+        else:
+            scale, dof = tr2 / tr1, tr1 * tr1 / tr2
+            if abs(dof - (n - int(n_params))) > 0.05 * n:
+                note = (f"the taus are correlated, so the deviance is read "
+                        f"against {dof:.1f} effective degrees of freedom "
+                        f"rather than {n - int(n_params)}")
 
     cdf = float(chi2_cdf(float(dev) / scale, dof))
     lo, hi = GOF_BAND

@@ -109,20 +109,30 @@ def dtheta_dz(z: float, lo: float | None, hi: float | None) -> float:
     return 1.0
 
 
-def numeric_jacobian(fn, z: np.ndarray, step: float = _JAC_STEP) -> np.ndarray:
+def numeric_jacobian(fn, z: np.ndarray, step: float = _JAC_STEP,
+                     scale=None) -> np.ndarray:
     """Central-difference Jacobian of a vector function, `J[i, j] = df_i/dz_j`.
 
-    The step is relative, `h_j = step * max(|z_j|, 1)`, because the
-    parameters of a stability model span decades -- a correlation time in
-    seconds beside a variance of 1e-24 -- and one absolute step cannot be
-    right for both. In the transformed coordinates a positive parameter is
-    a logarithm, so the relative step there is a fixed fractional step in
-    the parameter itself, which is exactly what is wanted.
+    The step is `h_j = step * scale_j`, and getting `scale` right is the
+    whole difficulty: the parameters of a stability model span decades -- a
+    correlation time of 1e3 s beside a variance of 1e-24 -- so no absolute
+    step suits both.
+
+    The default, `max(|z_j|, 1)`, is for the **optimizer's** coordinates,
+    where a positive parameter is a logarithm of order ten and the floor
+    keeps the step alive as a coordinate passes through zero. It is wrong
+    for raw parameters: differencing a variance of 1e-24 by 6e-6 does not
+    measure a derivative, it evaluates the model somewhere else entirely
+    and, for a positive quantity, somewhere it does not exist. Callers
+    working in the parameters themselves pass a relative `scale`.
     """
     z = np.asarray(z, dtype=np.float64)
+    if scale is None:
+        scale = np.maximum(np.abs(z), 1.0)
+    scale = np.broadcast_to(np.asarray(scale, dtype=np.float64), z.shape)
     out = []
     for j in range(z.size):
-        h = step * max(abs(z[j]), 1.0)
+        h = step * float(scale[j])
         up, dn = z.copy(), z.copy()
         up[j] += h
         dn[j] -= h
