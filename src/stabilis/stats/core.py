@@ -115,6 +115,14 @@ class StabilityResult:
     # masked gap removes terms in a way no formula recovers.
     run_lengths: tuple[int, ...] = ()
     run_terms: tuple[np.ndarray, ...] = ()
+    # Terms discarded at each averaging factor because their window touched
+    # a gap. Zero everywhere on a clean record. It is carried because a
+    # dropped term breaks the *contiguity* of the coefficient index, which
+    # nothing else on this object records: `n_terms` falling short is
+    # indistinguishable from a shorter record, and the cross-tau covariance
+    # in taucov.py needs the difference. Empty means "not recorded" -- a
+    # result assembled by hand rather than by this driver.
+    dropped_terms: tuple[int, ...] = ()
     # Whether `var` really is a variance. False for MTIE and TIE rms, which
     # this container still carries -- they are sigma-tau curves and belong
     # on the same plot -- but which must not be fed to anything that
@@ -180,6 +188,8 @@ class StabilityResult:
             coeffs=tuple(self.coeffs[i] for i in take) if self.coeffs else (),
             run_terms=tuple(self.run_terms[i] for i in take)
             if self.run_terms else (),
+            dropped_terms=tuple(self.dropped_terms[i] for i in take)
+            if self.dropped_terms else (),
         )
 
 
@@ -295,13 +305,13 @@ def run_estimator(
                 "coarser tau grid -- `tau.suggest(n)` names one."
             )
 
-    var, counts, coeff_list, kept, per_run = [], [], [], [], []
+    var, counts, coeff_list, kept, per_run, lost = [], [], [], [], [], []
     for m in afs:
         # Drop the gap-spoiled terms per run before pooling, not after, so
         # the surviving count is known run by run. Concatenation order and
         # the pooled array itself are unchanged either way.
-        parts = [coeff_fn(r, int(m), tau0) for r in runs]
-        parts = [p[np.isfinite(p)] for p in parts]
+        raw = [coeff_fn(r, int(m), tau0) for r in runs]
+        parts = [p[np.isfinite(p)] for p in raw]
         c = parts[0] if len(parts) == 1 else np.concatenate(parts)
         if c.size == 0:
             continue
@@ -309,6 +319,7 @@ def run_estimator(
         counts.append(int(c.size))
         kept.append(int(m))
         per_run.append(np.asarray([p.size for p in parts], dtype=np.int64))
+        lost.append(sum(p.size for p in raw) - int(c.size))
         if keep_coeffs:
             coeff_list.append(c)
 
@@ -343,4 +354,5 @@ def run_estimator(
         shape=shape,
         run_lengths=tuple(int(r.size) for r in runs),
         run_terms=tuple(per_run),
+        dropped_terms=tuple(int(v) for v in lost),
     )

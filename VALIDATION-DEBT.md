@@ -177,6 +177,35 @@ warning this library prints is not detecting the thing it warns about.
 That pairing is the same shape as item 3's, and would arrive with the same
 data.
 
+## 6. The cross-τ correlation is unmeasured for TOTVAR
+
+**Status: open, narrow, and cheap to close if it ever matters.**
+
+`stats/taucov.py` measures the covariance *between* the τ of one stability
+curve, so that a fit to that curve reports an honest parameter uncertainty
+instead of one that is too narrow. Its derivation assumes the coefficient
+arrays are jointly Gaussian and stationary in the start-sample index, which
+is true of the Allan family and is checked against Monte-Carlo scatter for
+white FM and random-walk FM in `tests/test_taucov.py`.
+
+**TOTVAR is the exception.** Its coefficients come from a record extended
+by reflection, so they are neither independent of each other in the way the
+derivation assumes nor stationary across the join. The index alignment
+holds — every τ has `N−2` terms starting at the same sample — so the
+correlation *is* computed rather than refused, and refusing would be the
+arbitrary choice. But it has not been measured against the scatter of
+repeated TOTVAR estimates the way the Allan family has.
+
+Discharged by one Monte-Carlo run of the same shape as the existing one:
+many realizations, `totdev` on each, sample correlation of `var` between
+adjacent τ against what a single record predicts. If it disagrees, the
+honest outcome is to decline TOTVAR to the independent diagonal, which the
+module already knows how to do.
+
+Everything else with no coefficient alignment — `adev`, the wavelet family,
+the Thêo family, any gapped record — already declines with a stated reason
+rather than guessing, so none of those is debt.
+
 ---
 
 ## Not debt
