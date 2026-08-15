@@ -67,7 +67,16 @@ def main() -> int:
 def _write(name: str, x: np.ndarray, alpha, seed) -> dict:
     path = INPUTS / name
     # One column, plain ASCII, no header -- what Stable32 reads without
-    # any import dialog. %.15e round-trips float64 exactly.
+    # any import dialog.
+    #
+    # %.15e does NOT round-trip float64: measured on 200k normal deviates,
+    # 42% of them come back a bit or two different. 17 significant digits
+    # is the guaranteed width and what `io/write.py` writes. This is left
+    # at 15 anyway, deliberately: these files and their SHA-256s in
+    # MANIFEST.md are the inputs Stable32 was actually run on, so changing
+    # a digit here would silently invalidate every committed export in
+    # outputs/. The text on disk is the reference, not the doubles that
+    # produced it, and text -> float64 -> text is stable at this width.
     text = "\n".join(f"{v:.15e}" for v in x) + "\n"
     path.write_text(text, encoding="ascii", newline="\n")
     return {

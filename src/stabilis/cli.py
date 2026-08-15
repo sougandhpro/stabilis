@@ -25,6 +25,7 @@ from .stats.core import GAP_POLICIES
 from .stats.edof import EDOF_METHODS
 from .stats.greenhall import GREENHALL_RUN_POLICIES
 from .gui import DEFAULT_PORT as GUI_DEFAULT_PORT
+from .io.write import FORMATS, TIME_COLUMNS
 from .stats.powerlaw import WEIGHT_METHODS
 from .tau import MODES
 
@@ -409,6 +410,41 @@ def build_parser() -> argparse.ArgumentParser:
                        help="just print the URL")
     p_gui.set_defaults(func=_cmd_gui)
 
+    p_export = sub.add_parser(
+        "export", help="write data, curves and report bundles back out"
+    )
+    export_sub = p_export.add_subparsers(dest="export_command", required=True)
+
+    p_xdata = export_sub.add_parser(
+        "data",
+        help="the record itself, in a format another tool can read",
+    )
+    _add_input_args(p_xdata)
+    p_xdata.add_argument(
+        "--format", default="stabilis", choices=FORMATS,
+        help="stabilis: a comment header carrying the rate and epoch, so "
+             "this library reads the series back whole. csv: the same, "
+             "comma-separated. stable32: bare numbers, no header, for "
+             "Stable32 and TimeLab",
+    )
+    p_xdata.add_argument(
+        "--time-column-out", default="", choices=TIME_COLUMNS,
+        metavar="{elapsed,unix,mjd}",
+        help="prepend a timetag column (default: none; the rate goes in "
+             "the header instead, which is exact)",
+    )
+    p_xdata.add_argument(
+        "--gap-out", type=float, metavar="VALUE",
+        help="write gaps as this value, for a format with no NaN",
+    )
+    p_xdata.add_argument(
+        "--digits", type=int, default=17,
+        help="significant digits (default 17, the width at which float64 "
+             "reads back exactly)",
+    )
+    p_xdata.add_argument("--out", required=True, help="write here")
+    p_xdata.set_defaults(func=_cmd_export_data)
+
     p_bench = sub.add_parser(
         "bench", help="the measurement setup: what it can and cannot determine"
     )
@@ -489,6 +525,32 @@ def _load(args):
         delimiter=args.delimiter,
         gap_value=args.gap_value,
     )
+
+
+def _cmd_export_data(args) -> int:
+    """Write the record back out, in a format something else can read.
+
+    The point of the default `stabilis` format is that the file says what
+    it is: the rate and the epoch ride in a comment block, so reading it
+    back needs no arguments and cannot be given the wrong ones. The
+    `stable32` format drops all of that, because the tools it is aimed at
+    were not asked to tolerate our comments.
+    """
+    from .io import save_frequency, save_phase
+
+    series = _load(args)
+    save = save_phase if args.kind == "phase" else save_frequency
+    written = save(
+        series,
+        args.out,
+        format=args.format,
+        time_column=args.time_column_out,
+        gap_value=args.gap_out,
+        digits=args.digits,
+    )
+    print(f"wrote {written.path} -- {series.n} samples, {series.n_gaps} gaps, "
+          f"{written.n_bytes} bytes, sha256 {written.sha256[:16]}")
+    return 0
 
 
 def _cmd_docs(args) -> int:

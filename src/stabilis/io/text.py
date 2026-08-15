@@ -22,12 +22,18 @@ from ..provenance import file_sha256, new_provenance
 from ..registry import register
 from ..types import FreqSeries, PhaseSeries
 
-__all__ = ["read_text", "read_table", "load_phase", "load_frequency",
-           "MAX_COLUMNS"]
+__all__ = ["read_text", "read_table", "read_header_meta", "load_phase",
+           "load_frequency", "MAX_COLUMNS"]
 
 MAX_COLUMNS = 8
 _DELIMITERS = (",", ";", "\t")
 _COMMENT_CHARS = "#%"
+
+# Keys this library writes into a leading comment block (see `io/write.py`)
+# and will read back. Deliberately short: a header is a convenience, and
+# anything load-bearing enough to need more than a rate and an epoch should
+# be an argument the caller passes explicitly.
+_META_KEYS = ("rate_hz", "epoch_unix")
 
 # Timetags rarely land on an exact grid. Warn when the spread of sample
 # intervals exceeds this fraction of the median interval.
@@ -109,6 +115,38 @@ def read_table(path: str | Path, delimiter: str | None = None,
             bad_fields=max(0, defects.bad_fields - len(whole) * rows.shape[0]),
             text_columns=tuple(labels[i] for i in whole))
     return labels, rows, defects
+
+
+def read_header_meta(path: str | Path,
+                     comment_chars: str = _COMMENT_CHARS) -> dict:
+    """`key = value` pairs from the leading comment block, if there are any.
+
+    Only the keys in `_META_KEYS` are returned and only when they parse as
+    floats, so an unrecognised or malformed line is ignored rather than
+    raising -- a comment block is a courtesy from whoever wrote the file
+    and must never be able to stop it being read.
+
+    This is what makes a written record round-trip *whole*: the numbers
+    alone do not say what the sample interval was, and a caller who has to
+    supply the rate again by hand can supply the wrong one.
+    """
+    meta: dict = {}
+    with open(path, "r") as fh:
+        for raw in fh:
+            line = raw.split("//", 1)[0].strip()
+            if not line:
+                continue
+            if line[0] not in comment_chars:
+                break                       # the data has started
+            body = line.lstrip(comment_chars).strip()
+            key, sep, value = body.partition("=")
+            if not sep or key.strip() not in _META_KEYS:
+                continue
+            try:
+                meta[key.strip()] = float(value.strip())
+            except ValueError:
+                continue
+    return meta
 
 
 def _header(path: Path, comment_chars: str, delimiter: str | None,
@@ -316,8 +354,10 @@ def load_phase(
     values, times, prov = _load(
         path, column, time_column, delimiter, gap_value, "phase", strict
     )
-    rate_hz, prov = _resolve_rate(rate_hz, times, prov)
-    return PhaseSeries(x=values, rate_hz=rate_hz, provenance=prov)
+    meta = read_header_meta(path)
+    rate_hz, prov = _resolve_rate(rate_hz, times, prov, meta)
+    return PhaseSeries(x=values, rate_hz=rate_hz,
+                       epoch=meta.get("epoch_unix", 0.0), provenance=prov)
 
 
 def load_frequency(
@@ -333,8 +373,10 @@ def load_frequency(
     values, times, prov = _load(
         path, column, time_column, delimiter, gap_value, "frequency", strict
     )
-    rate_hz, prov = _resolve_rate(rate_hz, times, prov)
-    return FreqSeries(y=values, rate_hz=rate_hz, provenance=prov)
+    meta = read_header_meta(path)
+    rate_hz, prov = _resolve_rate(rate_hz, times, prov, meta)
+    return FreqSeries(y=values, rate_hz=rate_hz,
+                      epoch=meta.get("epoch_unix", 0.0), provenance=prov)
 
 
 def _load(path, column, time_column, delimiter, gap_value, kind, strict=False):
@@ -366,10 +408,27 @@ def _load(path, column, time_column, delimiter, gap_value, kind, strict=False):
     return values, times, prov
 
 
-def _resolve_rate(rate_hz, times, prov):
-    """Use the given rate, or infer one from timetags and say so."""
+def _resolve_rate(rate_hz, times, prov, meta=None):
+    """Use the given rate, then the file's header, then the timetags.
+
+    The header comes before the timetags because it is exact where they are
+    inferred: `io/write.py` writes the rate it was holding, while a timetag
+    column has been through a float64 round trip and a median.
+
+    The two are deliberately *not* cross-checked. This reader has no idea
+    what unit a time column is in -- it divides differences and assumes
+    seconds -- so an MJD column, which is days, disagrees with the header
+    by a factor of 86400 while both are perfectly correct. A check that
+    cannot tell a real conflict from a unit would only teach the reader to
+    ignore it.
+    """
     if rate_hz is not None:
         return rate_hz, prov
+    header_rate = (meta or {}).get("rate_hz")
+    if header_rate is not None and header_rate > 0:
+        prov = record(prov, "io.text", "header_rate", {"rate_hz": header_rate},
+                      "rate taken from the file's own header")
+        return header_rate, prov
     if times is None:
         raise ValueError("give rate_hz, or a time_column to infer it from")
     steps = np.diff(times)

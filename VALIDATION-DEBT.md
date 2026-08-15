@@ -243,6 +243,36 @@ routes are validated as one.
 
 ---
 
+## 8. Nothing outside this repository has opened a file we wrote
+
+**Status: open, cheap to close, and it rides along with item 1.**
+
+`io/write.py` writes three formats, one of which exists solely so that
+Stable32 and TimeLab can read it. Every test covering it is a round trip
+through *our own* reader — `tests/test_io_write.py` says so at the top of
+the file, and `theory/export.md` carries the table distinguishing what each
+assertion establishes.
+
+This is the mirror image of item 3's rule. A reader validated only against
+its own writer is validated against nothing; a writer validated only against
+its own reader is in exactly the same position. The two formats agreeing
+proves the pair is self-consistent, which is enough to use an export as an
+intermediate between two runs of this library and not enough to claim
+interoperability with anything.
+
+**How it gets discharged**, and it is one line on an existing run sheet
+rather than a new session: while doing item 1, export `alphap0.dat` back out
+through `stabilis export data --format stable32`, open *that* file in
+Stable32 1.62, and run the same statistics. If the result matches the export
+already committed for the original input, the writer is interoperable and
+this item closes. If it does not, the difference is the evidence. Add the
+step to `tests/data/stable32/README.md`.
+
+The σ(τ) table writer, when it lands, inherits the same debt and the same
+remedy — with the additional check that TimeLab can plot the file.
+
+---
+
 ## Not debt
 
 For the avoidance of doubt, these are *already* validated and are not

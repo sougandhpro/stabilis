@@ -23,7 +23,11 @@ __all__ = ["KINDS", "register", "get", "available", "load_plugins"]
 # a lookup that returned only the function would leave a plugin author
 # unable to supply the other four. The registry is a name-to-thing dict; it
 # does not care which thing.
-KINDS = ("estimator", "reader", "noiseid", "model", "report")
+# "writer" is the mirror of "reader" and holds the same sort of thing: a
+# function that moves a data column between an array and a file. Result
+# tables and report bundles are *not* writers in that sense -- they are the
+# output layer, which is what the separate "report" kind is for.
+KINDS = ("estimator", "reader", "noiseid", "model", "report", "writer")
 
 _REGISTRIES: dict[str, dict] = {kind: {} for kind in KINDS}
 _plugins_loaded = False

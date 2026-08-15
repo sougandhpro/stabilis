@@ -18,7 +18,7 @@ top-level name that shadows a submodule makes `import stabilis.fit` and
 `from stabilis.fit import ...` mean different things, which is the sort of
 ambiguity that costs somebody an afternoon.
 
-Three subsystems are deliberately *not* re-exported, and their absence is
+Four subsystems are deliberately *not* re-exported, and their absence is
 the documentation:
 
 * `stabilis.bench` -- the measurement setup. Optional, and `stats/` is
@@ -29,6 +29,10 @@ the documentation:
 * `stabilis.report` -- the customer-facing measurement report. Its figure
   path wants matplotlib for the same reason, and it is an output layer
   rather than part of the analysis API.
+* `stabilis.export` -- sigma-tau tables and report bundles, the same output
+  layer. `save_phase` and `save_frequency` *are* re-exported, because
+  writing a data file is the mirror of reading one and belongs beside
+  `load_phase`; writing a *result* is a different job.
 
     import numpy as np
     from stabilis import load_phase, oadev, confidence
@@ -50,7 +54,13 @@ except PackageNotFoundError:  # running from a source tree, not installed
 # __version__ must be bound before these import, since provenance reads it.
 from .provenance import Provenance, Step, new_provenance  # noqa: E402
 from .types import FreqSeries, PhaseSeries, to_frequency, to_phase  # noqa: E402
-from .io import load_frequency, load_phase  # noqa: E402
+from .io import (  # noqa: E402
+    WrittenFile,
+    load_frequency,
+    load_phase,
+    save_frequency,
+    save_phase,
+)
 from .edit import drop_outliers, select_range, summary  # noqa: E402
 from .preprocess import basic_stats  # noqa: E402
 from .stats import (  # noqa: E402
@@ -98,6 +108,9 @@ __all__ = [
     "to_phase",
     "load_phase",
     "load_frequency",
+    "save_phase",
+    "save_frequency",
+    "WrittenFile",
     "basic_stats",
     # preparation
     "select_range",
