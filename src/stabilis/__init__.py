@@ -87,6 +87,11 @@ from .stats import (  # noqa: E402
     welch,
     Spectrum,
     script_l,
+    Spur,
+    SpurTable,
+    detect_spurs,
+    notch_spurs,
+    sinusoid_dev,
 )
 from .multi import (  # noqa: E402
     CrossMatrix,
@@ -137,6 +142,11 @@ __all__ = [
     "welch",
     "Spectrum",
     "script_l",
+    "Spur",
+    "SpurTable",
+    "detect_spurs",
+    "notch_spurs",
+    "sinusoid_dev",
     # uncertainty
     "confidence",
     "Confidence",

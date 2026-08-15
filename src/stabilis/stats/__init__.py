@@ -14,6 +14,7 @@ from .total import totdev, totvar_extend
 from .noiseid import NoiseID, identify, identify_curve
 from .powerlaw import PowerLawFit, decompose
 from .psd import Spectrum, script_l, welch
+from .spur import Spur, SpurTable, detect_spurs, notch_spurs, sinusoid_dev
 from .taucov import TauCovariance, tau_covariance
 
 __all__ = [
@@ -51,6 +52,11 @@ __all__ = [
     "Spectrum",
     "welch",
     "script_l",
+    "Spur",
+    "SpurTable",
+    "detect_spurs",
+    "notch_spurs",
+    "sinusoid_dev",
     "TauCovariance",
     "tau_covariance",
 ]
