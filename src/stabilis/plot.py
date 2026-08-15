@@ -29,6 +29,8 @@ __all__ = [
     "spec_points",
     "phase",
     "frequency",
+    "spectrum",
+    "script_l",
     "bench_solution",
     "save",
 ]
@@ -177,6 +179,55 @@ def frequency(series, ax=None, label: str | None = None, **kwargs):
     ax.set_xlabel("time (s)")
     ax.set_ylabel("fractional frequency y(t)")
     ax.grid(True, alpha=0.3)
+    if label:
+        ax.legend()
+    return ax
+
+
+def spectrum(spec, label: str | None = None, ax=None, **kwargs):
+    """A power spectral density, log-log, DC dropped.
+
+    DC is dropped because the axis is logarithmic and because a detrended
+    record's DC bin holds the residue of the detrend rather than a
+    measurement -- plotting it would draw attention to the one bin that
+    means least.
+    """
+    ax = _axes(ax)
+    f, psd = np.asarray(spec.f), np.asarray(spec.psd)
+    keep = f > 0.0
+    ax.plot(f[keep], psd[keep], label=label, **kwargs)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Fourier frequency f (Hz)")
+    ax.set_ylabel(f"{spec.kind} ({spec.units})")
+    ax.grid(True, which="both", alpha=0.3)
+    if label:
+        ax.legend()
+    return ax
+
+
+def script_l(spec, nu0_hz=None, label: str | None = None, ax=None, **kwargs):
+    """`L(f)` in dBc/Hz, drawn only where the small-angle result holds.
+
+    The refused bins are left as a gap rather than joined across, because a
+    line drawn through them asserts a near-carrier phase-noise figure that
+    the measurement does not support -- which is the one part of this plot
+    a datasheet gets written from.
+    """
+    from .stats.psd import script_l as compute
+
+    ax = _axes(ax)
+    f, dbc, valid = compute(spec, nu0_hz)
+    keep = f > 0.0
+    ax.plot(f[keep], dbc[keep], label=label, **kwargs)   # NaN breaks the line
+    ax.set_xscale("log")
+    ax.set_xlabel("offset frequency f (Hz)")
+    ax.set_ylabel("L(f) (dBc/Hz)")
+    ax.grid(True, which="both", alpha=0.3)
+    if not valid.all():
+        ax.set_title(f"{int((~valid).sum())} bins withheld: "
+                     "phase excursion too large for L = S_phi/2",
+                     fontsize="small")
     if label:
         ax.legend()
     return ax

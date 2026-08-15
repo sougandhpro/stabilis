@@ -273,6 +273,31 @@ remedy — with the additional check that TimeLab can plot the file.
 
 ---
 
+## 9. A spectrum carries a level and no error bar
+
+**Status: open, and it is a gap in the library's own standard rather than
+in its evidence.**
+
+Every σ(τ) curve here comes with a confidence interval, and the argument for
+this project is largely that those intervals are honest. `stats/psd.py`
+carries none. A Welch bin averaged over `N` segments is χ²-distributed with
+about `2N` degrees of freedom, so the interval is the same machinery
+`stats/ci.py` already implements — what is missing is the effective degrees
+of freedom, which is *not* `2N` when segments overlap: 50 % overlap with a
+Hann window correlates neighbouring segments and the usual Welch result is
+about `1.8N` rather than `2N`.
+
+Until that is written and measured, a spectrum from this library is less
+well characterised than any of its variances, and the asymmetry should be
+stated rather than left for a reader to notice. `theory/psd.md` says so.
+
+**How it gets discharged:** derive the overlap-correlation factor for each
+shipped window, verify the resulting EDOF by Monte-Carlo containment the
+same way `stabilis validate` already scores the χ² intervals, and route it
+through the existing `Confidence` path rather than a second one.
+
+---
+
 ## Not debt
 
 For the avoidance of doubt, these are *already* validated and are not

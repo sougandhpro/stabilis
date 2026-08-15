@@ -13,6 +13,7 @@ from .wavelet import wavelet_variance, wdev
 from .total import totdev, totvar_extend
 from .noiseid import NoiseID, identify, identify_curve
 from .powerlaw import PowerLawFit, decompose
+from .psd import Spectrum, script_l, welch
 from .taucov import TauCovariance, tau_covariance
 
 __all__ = [
@@ -47,6 +48,9 @@ __all__ = [
     "unbias_deviation",
     "PowerLawFit",
     "decompose",
+    "Spectrum",
+    "welch",
+    "script_l",
     "TauCovariance",
     "tau_covariance",
 ]

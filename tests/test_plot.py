@@ -200,3 +200,42 @@ def test_the_plot_command_handles_a_non_variance_estimator(tmp_path):
     assert main(["plot", str(data), "--rate", "1.0", "--estimator", "mtie",
                  "--out", str(out)]) == 0
     assert out.exists()
+
+
+# --------------------------------------------------------------------------
+# Spectra
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def spec():
+    from stabilis.stats.psd import welch
+
+    fs = power_law_freq(2**13, 0, rate_hz=1.0, rng=np.random.default_rng(2),
+                        h_alpha=1e-24)
+    return welch(fs)
+
+
+def test_spectrum_is_log_log_and_drops_dc(spec):
+    """DC is the residue of the detrend, not a measurement, and a log axis
+    cannot draw it anyway."""
+    ax = plot.spectrum(spec, label="S_y")
+    assert ax.get_xscale() == "log" and ax.get_yscale() == "log"
+    drawn = ax.lines[0].get_xdata()
+    assert drawn.min() > 0.0
+    assert len(drawn) == spec.f.size - 1
+
+
+def test_script_l_leaves_a_gap_where_it_withheld_a_value():
+    """A line joined across the withheld region would assert the very
+    near-carrier figure the measurement refused to make."""
+    from stabilis import to_phase
+    from stabilis.stats.psd import welch
+
+    noisy = power_law_freq(2**13, 0, rate_hz=1.0,
+                           rng=np.random.default_rng(4), h_alpha=1e-20)
+    ax = plot.script_l(welch(to_phase(noisy), detrend="none"), nu0_hz=10e9)
+    y = ax.lines[0].get_ydata()
+    assert np.isnan(y).any()                 # NaN is what breaks the line
+    assert "withheld" in ax.get_title()
+    assert ax.get_ylabel() == "L(f) (dBc/Hz)"

@@ -84,6 +84,9 @@ from .stats import (  # noqa: E402
     theobr,
     theoh,
     wdev,
+    welch,
+    Spectrum,
+    script_l,
 )
 from .multi import (  # noqa: E402
     CrossMatrix,
@@ -130,6 +133,10 @@ __all__ = [
     "theoh",
     "wdev",
     "StabilityResult",
+    # spectra
+    "welch",
+    "Spectrum",
+    "script_l",
     # uncertainty
     "confidence",
     "Confidence",
