@@ -25,6 +25,7 @@ from .stats.core import GAP_POLICIES
 from .stats.edof import EDOF_METHODS
 from .stats.greenhall import GREENHALL_RUN_POLICIES
 from .gui import DEFAULT_PORT as GUI_DEFAULT_PORT
+from .export import TABLE_FORMATS
 from .io.write import FORMATS, TIME_COLUMNS
 from .stats.powerlaw import WEIGHT_METHODS
 from .tau import MODES
@@ -445,6 +446,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_xdata.add_argument("--out", required=True, help="write here")
     p_xdata.set_defaults(func=_cmd_export_data)
 
+    p_xtab = export_sub.add_parser(
+        "table",
+        help="the sigma-tau curve, for a spreadsheet, a program, or Stable32",
+    )
+    _add_input_args(p_xtab)
+    p_xtab.add_argument(
+        "--estimator", default="oadev",
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "totdev"),
+    )
+    p_xtab.add_argument("--taus", default="octave", choices=MODES)
+    p_xtab.add_argument("--max-af", type=int, help="largest averaging factor")
+    p_xtab.add_argument("--gap-policy", default="segment", choices=GAP_POLICIES)
+    p_xtab.add_argument("--confidence", type=float, default=ONE_SIGMA)
+    p_xtab.add_argument("--edof-method", default="auto", choices=EDOF_METHODS)
+    p_xtab.add_argument(
+        "--alpha", type=int,
+        help="assumed power law; required by --format stable32 unless the "
+             "interval already carries one",
+    )
+    p_xtab.add_argument("--no-confidence", action="store_true",
+                        help="curve only, no interval")
+    p_xtab.add_argument(
+        "--format", default="csv", choices=TABLE_FORMATS,
+        help="csv: eight columns for a spreadsheet. json: every field, "
+             "including what the csv cannot carry. stable32: the block "
+             "Stable32 prints, to its own bytes -- and to its four decimals",
+    )
+    p_xtab.add_argument("--out", help="write here (default: stdout)")
+    p_xtab.set_defaults(func=_cmd_export_table)
+
     p_bench = sub.add_parser(
         "bench", help="the measurement setup: what it can and cannot determine"
     )
@@ -550,6 +581,41 @@ def _cmd_export_data(args) -> int:
     )
     print(f"wrote {written.path} -- {series.n} samples, {series.n_gaps} gaps, "
           f"{written.n_bytes} bytes, sha256 {written.sha256[:16]}")
+    return 0
+
+
+def _cmd_export_table(args) -> int:
+    """The curve itself, in whichever of the three shapes is wanted.
+
+    Same library calls the estimator subcommands make, so an exported table
+    and a printed one can never disagree.
+    """
+    from .export import to_csv, to_json, to_stable32
+    from .registry import get
+
+    series = _load(args)
+    estimator = get("estimator", args.estimator)
+    want_ci = not args.no_confidence
+    result = estimator(series, taus=args.taus, max_af=args.max_af,
+                       gap_policy=args.gap_policy, keep_coeffs=want_ci)
+    ci = _confidence_for(args, result, series) if want_ci else None
+
+    if args.format == "csv":
+        text, newline = to_csv(result, ci), "\n"
+    elif args.format == "json":
+        text, newline = to_json(result, ci) + "\n", "\n"
+    else:
+        text, newline = to_stable32(series, result, ci, alpha=args.alpha,
+                                    source=Path(args.path).name), ""
+
+    if not args.out:
+        print(text, end="")
+        return 0
+    # newline="" leaves the CRLF the Stable32 writer put in; the others
+    # asked for LF and must not be translated to the platform's ending.
+    with open(args.out, "w", encoding="utf-8", newline=newline) as fh:
+        fh.write(text)
+    print(f"wrote {args.out} -- {result.af.size} taus, {args.format} format")
     return 0
 
 
@@ -689,26 +755,11 @@ def _cmd_estimate(args) -> int:
 def _print_result(args, result, ci, header: str) -> int:
     """The tau table, shared by every estimator that prints one."""
     if args.json:
-        payload = {
-            "kind": result.kind,
-            "af": result.af.tolist(),
-            "tau_s": result.tau_s.tolist(),
-            "var": result.var.tolist(),
-            "dev": result.dev.tolist(),
-            "n_terms": result.n_terms.tolist(),
-            "provenance": to_dict((ci or result).provenance),
-        }
-        if ci is not None:
-            payload["confidence"] = {
-                "level": ci.level,
-                "edof": ci.edof.tolist(),
-                "edof_method": list(ci.method),
-                "dev_lo": ci.dev_lo.tolist(),
-                "dev_hi": ci.dev_hi.tolist(),
-                "alpha": None if ci.alpha is None else ci.alpha.tolist(),
-                "declined": list(ci.declined),
-            }
-        print(json.dumps(payload, indent=2, default=str))
+        # One implementation of the result schema, in `export.table`, so the
+        # command line and the library file cannot drift apart.
+        from .export import to_json as result_json
+
+        print(result_json(result, ci))
         return 0
 
     print(f"# {result.kind.upper()} for {args.path}")

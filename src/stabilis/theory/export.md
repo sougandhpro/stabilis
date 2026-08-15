@@ -113,6 +113,90 @@ is an ordinary phase value. So writing a gapped record in `stable32` format
 that already occurs in the data is refused too, since reading that file back
 would delete real samples.
 
+## 5. The curve: three shapes, and what each one drops
+
+A σ(τ) curve leaves by one of three doors, and each loses something the one
+above it kept.
+
+**JSON** is the complete record: `af`, `tau_s`, `var` *and* `dev`, the
+interval, the per-τ EDOF and the method that produced each one, the points
+where Greenhall declined and why, and the provenance behind all of it. It
+carries `var` as well as `dev` because the library stores variances and
+derives deviations — an export that shipped only the deviation would force
+every consumer to square it back, which is the round trip the code style
+forbids internally.
+
+The provenance written is the *interval's*, not the result's. Computing an
+interval appends steps, and taking the shorter record would silently drop
+the EDOF method from the audit trail of a number that depends on it.
+
+**CSV** is a table for a spreadsheet and is lossy by construction. A
+rectangular grid cannot hold a per-τ method string or a decline reason, so
+those stay in the JSON. The column budget is hard rather than tasteful:
+`io/text.py` refuses a file wider than `MAX_COLUMNS = 8`, so a ninth column
+would produce a file this library could not read back. A column with
+nothing to put in it is *absent* rather than padded — an empty cell reads
+back as a gap and a zero reads back as a measurement.
+
+**Stable32 text** is an interchange format, not an archive format. It
+prints σ to four decimals, so a curve written there has shed eleven digits
+it had. What it buys is that Stable32 and TimeLab can open it.
+
+### The Stable32 block is transcribed, not derived
+
+Every one of the **6461 data rows** in `tests/data/stable32/outputs/` is
+reproduced character for character by one format string:
+
+    {af:5d}{tau:13.4e}{n:9d}{alpha:6d}{lo:13.4e}{sig:14.4e}{hi:15.4e}
+
+75 characters, contiguous, no separators, CRLF-terminated. The eight
+preamble lines reproduce exactly too, with `Maximum`, `Minimum` and
+`Average` being `preprocess.basic_stats` at `%.6e` — which incidentally
+confirms our descriptive statistics agree with Stable32's on the same file.
+
+The *column header* lines are hand-tuned strings that do **not** align to
+the data beneath them, and there are four of them because the middle column
+is renamed after the statistic (`Sigma`, `Mod Sigma`, `Hadamard Sig`,
+`Time Sigma`). They are stored verbatim rather than generated from a width.
+This is the same fact that makes `validate/stable32.py` match rows by arity
+and never by header text.
+
+`export/` does not import `validate/`, in either direction: importing
+`stabilis.validate` executes its `__init__` and pulls the whole
+evidence-report chain, which an export has no business dragging in. The two
+modules' names for the five statistics are asserted equal by test instead.
+
+### Four refusals, because the format has no honest encoding
+
+* **An estimator Stable32 never named** — TOTDEV, the Thêo family, MTIE,
+  the wavelets. There is no Sigma Type for them.
+* **A frequency series.** Every committed export says `Phase Data Points`.
+  No export of a frequency file has been captured, so the preamble for one
+  would have to be guessed.
+* **A gapped record.** `Points 1 thru N of N` is a contiguity claim.
+* **A result with no α.** The Alpha column is an integer and the format has
+  no way to say "unknown". Writing 0 asserts white FM — and the data-driven
+  EDOF methods leave `alpha` as `None` *because* not assuming a noise type
+  is the entire point of them. Filling it in here would undo that where
+  nobody would look.
+
+### What the comparison actually shows
+
+Against the committed Stable32 1.62 export of `alphap0.dat`, computing the
+curve here from the same input file:
+
+| part of the block | agreement |
+|---|---|
+| preamble and column header | byte-identical |
+| `AF`, `Tau`, `#`, `Alpha` | byte-identical |
+| `Sigma` | byte-identical at the four decimals printed; worst relative difference 4.9 × 10⁻⁵ over 6458 points |
+| `Min Sigma`, `Max Sigma` | differ in the last digit or two — Stable32's implied EDOF runs up to 1.9 % above ours at small m |
+
+That last row is a **known, recorded discrepancy**, not a defect of the
+writer: it is `VALIDATION-DEBT.md` item 1, and it is measured every run by
+`stabilis validate`. If the bounds ever agreed exactly, something would
+have been fitted to the reference rather than derived.
+
 ## What a round trip does and does not prove
 
 | assertion | what it establishes |
@@ -120,6 +204,11 @@ would delete real samples.
 | written → read → identical doubles | **Self-consistency.** This library's writer and reader agree. Enough to use an export as an intermediate; not evidence about any other tool. |
 | gaps, epoch and rate survive | Self-consistency, same standing. |
 | the printed timetag check | A property of the file itself, independent of any reader. |
+| the CSV re-read through `read_table` | Self-consistency. |
+| σ(τ) table → `validate/stable32.parse` | Self-consistency, and only to four figures, because that is all the format carries. |
+| **6461 committed rows rebuilt exactly** | **Interop, formatting.** The reference is Stable32's own bytes. Establishes the layout, not our arithmetic — the values came from our parser. |
+| **the preamble rebuilt exactly** | **Interop, formatting**, plus agreement of the descriptive statistics. |
+| **σ computed here vs σ Stable32 printed** | **Interop, numbers and formatting together.** Everything but the reference is ours. The strongest assertion available. |
 | **no test in this repo** | **That Stable32 or TimeLab can open a file we wrote.** |
 
 That last row is the honest one. `VALIDATION-DEBT.md` item 3 states the rule
@@ -151,6 +240,26 @@ the export already committed for the original.
   endings are LF whichever platform wrote them;
 * the fifteen-digit measurement above, so the default has evidence rather
   than a rationale.
+
+`tests/test_export_table.py`:
+
+* the CSV never exceeds the width our own reader accepts, reads back
+  through `read_table` with its column names and no defects, and keeps
+  every digit of the curve;
+* a curve with no interval writes four columns rather than columns of
+  filler, and the α column appears only when a power law was assumed;
+* the JSON carries `var` beside `dev`, takes the interval's provenance
+  rather than the result's, says whether the quantity is a variance, and
+  keeps what the CSV cannot — the per-τ method and the decline reasons;
+* **the command line's `--json` output is byte-for-byte this module's**,
+  which is the proof that the CLI no longer keeps a second hand-written
+  copy of the result schema, and that every key it used to emit is still
+  there.
+
+`tests/test_export_stable32.py` — the three **interop** assertions in the
+table above, plus: the absent-bound convention survives in both directions;
+our five statistic names are the reader's map inverted; the line endings
+are CRLF; and each of the four refusals.
 
 **Not validated.** That anything outside this repository can read what it
 writes. See the table above and `VALIDATION-DEBT.md`.
