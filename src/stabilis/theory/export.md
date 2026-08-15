@@ -197,6 +197,55 @@ writer: it is `VALIDATION-DEBT.md` item 1, and it is measured every run by
 `stabilis validate`. If the bounds ever agreed exactly, something would
 have been fitted to the reference rather than derived.
 
+## 6. The bundle, and what its digest is over
+
+A bundle is one measurement as a directory: the record itself, the curve in
+two or three forms, the report, the provenance, and a SHA-256 for each.
+
+    run/
+      MANIFEST.json      schema, digest, and a hash for every file below
+      SHA256SUMS         the same hashes, in the format `sha256sum -c` reads
+      curve.csv          eight columns
+      curve.json         the complete record
+      curve.s32.txt      the Stable32 block, when the format admits it
+      data/<name>        the source record, byte for byte
+      provenance.json
+      report.html
+      sigma_tau.png      when matplotlib is installed
+
+The source record is **copied, not re-serialized**, so the copy's SHA-256
+still equals `provenance.source_sha256` and the chain from the bytes that
+arrived to the number that was reported is unbroken. A re-serialized copy
+would hash differently and quietly sever it. `--no-data` leaves the record
+out for a large or licence-encumbered file; the *hash* stays either way,
+so the bundle is still anchored to what was analysed.
+
+### The digest is over the measurement, not over the files
+
+Hashing the files is the obvious construction and it is wrong. `curve.json`
+embeds the provenance, provenance records *when* each step happened, and a
+digest that changes on every run of the same analysis says nothing at all.
+
+So the digest covers the curve (`kind`, `af`, `tau_s`, `var`, `n_terms`),
+the interval (`level`, `edof`, `var_lo`, `var_hi`, `method`, `alpha`), and
+the SHA-256 of the data they came from. That last term matters: without it,
+two different records that happened to yield the same curve would collide.
+
+This is `report.build`'s rule one level up — its digest already excludes the
+operator, the title and the timestamp so that two copies of one report
+compare by sixteen characters.
+
+**The bytes of a bundle are therefore not reproducible, and that is not a
+defect.** Provenance is a record of when work was done; a bundle that could
+be made byte-identical on another day would be one that had thrown that
+away. What is reproducible is the digest — and the per-file hashes in
+`MANIFEST.json` and `SHA256SUMS` are for a different job, detecting
+tampering with *this* copy.
+
+The figure is the one optional member. The core is numpy-only and that is a
+selling point, so a bundle built without matplotlib carries every number
+and simply says in provenance that the picture is missing.
+
 ## What a round trip does and does not prove
 
 | assertion | what it establishes |
@@ -260,6 +309,22 @@ the export already committed for the original.
 table above, plus: the absent-bound convention survives in both directions;
 our five statistic names are the reader's map inverted; the line endings
 are CRLF; and each of the four refusals.
+
+`tests/test_export_bundle.py`:
+
+* the same analysis gives the same digest, a different estimator gives a
+  different one, and the digest does not move although the evidence files
+  carry wall-clock times — which is the measurement showing that a
+  file-hash digest would have been the wrong construction;
+* the copied record is the original bytes and hashes to what provenance
+  recorded, and leaving it out changes neither the digest nor the anchor;
+* an in-memory series is serialized instead and *said* to have been;
+* the manifest hashes every file it lists and lists every file except
+  itself and `SHA256SUMS`, whose format `sha256sum -c` accepts;
+* `verify` returns every changed file rather than the first, and reports a
+  missing one rather than raising;
+* a bundle built without matplotlib is complete but for the picture;
+* it refuses to write over a bundle unless asked.
 
 **Not validated.** That anything outside this repository can read what it
 writes. See the table above and `VALIDATION-DEBT.md`.

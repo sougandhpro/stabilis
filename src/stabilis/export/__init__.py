@@ -26,6 +26,7 @@ Kept off `stabilis.__all__` because it is an output layer, alongside
 `plot`, `bench` and `report`.
 """
 
+from .bundle import CHECKSUMS, MANIFEST, SCHEMA, Bundle, build, verify
 from .stable32 import ABSENT, HEADERS, NEWLINE, ROW, SIGMA_LABELS, to_stable32
 from .table import COLUMNS, to_csv, to_dict, to_json
 
@@ -45,4 +46,10 @@ __all__ = [
     "ABSENT",
     "NEWLINE",
     "to_stable32",
+    "Bundle",
+    "SCHEMA",
+    "MANIFEST",
+    "CHECKSUMS",
+    "build",
+    "verify",
 ]

@@ -86,8 +86,8 @@ figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M3 and M5 complete, and the measurement report.** 986 tests;
-`stabilis validate` 33/33.
+**M0–M3 and M5 complete, plus the measurement report, the fitting layer and
+the export layer.** 1196 tests; `stabilis validate` 35/35.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -146,6 +146,16 @@ legitimately be quoted. Since then:
   produce. The fit refuses to quote parameters whose deviance is outside
   what its effective degrees of freedom admit, in either direction.
 - **The measurement report** — see below.
+- **Export** — the record back out as self-describing ASCII (the file
+  carries its own rate and epoch, so a round trip needs no arguments and
+  cannot be given the wrong ones), the curve as CSV or JSON, and the block
+  Stable32 prints. That last one is byte-checked: all 6461 data rows in the
+  committed Stable32 1.62 exports are reproduced character for character,
+  the preamble with them, and the σ column computed here agrees to the last
+  digit the format carries. Plus `stabilis export bundle`, a directory
+  holding the data, the curve, the report and a SHA-256 for each, whose
+  digest is over the *measurement* rather than the files — so two copies
+  compare in sixteen characters however long apart they were made.
 - **Plots** — σ(τ) with asymmetric error bars, power-law slope guides,
   phase, frequency, and the bench solution.
 
@@ -190,8 +200,8 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — export, then power spectra and masks. Instrument readers wait on
-paired vendor exports.
+**Next** — power spectra and masks. Instrument readers wait on paired
+vendor exports.
 
 ## Cross-variances
 
@@ -328,6 +338,41 @@ This is a measurement report, not a calibration certificate — it asserts
 no traceability chain and makes no accreditation claim. `stabilis
 validate` is the separate, and different, question of whether the software
 is right.
+
+## Getting it back out
+
+```bash
+# the record itself; the file carries its rate and epoch
+stabilis export data dut.dat --rate 1 --out clean.dat
+stabilis stats clean.dat              # no --rate needed, it says so itself
+
+# the curve, for a spreadsheet, a program, or Stable32
+stabilis export table dut.dat --rate 1 --format csv --out curve.csv
+stabilis export table dut.dat --rate 1 --format stable32 \
+    --edof-method greenhall --alpha 0 --out curve.txt
+
+# everything, with a manifest of what it all hashes to
+stabilis export bundle dut.dat --rate 1 --spec 1:2e-12 --out ./run-2026-08-15/
+```
+
+Three decisions worth knowing about. Values are written at **17 significant
+digits**, because `%.15e` — the width people reach for — returns a different
+double for 42 % of them; a record written and re-read is bit-identical.
+Gaps are written as gaps, and the Stable32 format, which has no spelling for
+a missing sample, **refuses** rather than writing the zero its own
+convention would suggest: a genuine zero-offset measurement and a missing
+one must not become the same bytes. And a bundle's digest is taken over the
+*measurement* — the curve, the interval, and the hash of the data they came
+from — not over the files, since the provenance embedded in them carries a
+timestamp and a file-hash digest would change on every run.
+
+The Stable32 writer is checked against Stable32's own output rather than
+against ours: all 6461 data rows in the committed 1.62 exports are
+reproduced character for character, and the σ column computed here from the
+same input agrees to the last digit the format prints. What no test here
+shows is that Stable32 can *read* what we write — that needs Stable32, and
+it is item 8 of `VALIDATION-DEBT.md` until somebody runs it. See
+`stabilis docs export`.
 
 ## A GUI, for when flags are tedious
 

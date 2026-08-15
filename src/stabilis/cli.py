@@ -476,6 +476,44 @@ def build_parser() -> argparse.ArgumentParser:
     p_xtab.add_argument("--out", help="write here (default: stdout)")
     p_xtab.set_defaults(func=_cmd_export_table)
 
+    p_xbun = export_sub.add_parser(
+        "bundle",
+        help="a directory carrying the data, the curve, the report and a "
+             "manifest of what everything hashes to",
+    )
+    _add_input_args(p_xbun)
+    p_xbun.add_argument(
+        "--estimator", default="oadev",
+        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "totdev"),
+    )
+    p_xbun.add_argument("--taus", default="octave", choices=MODES)
+    p_xbun.add_argument("--max-af", type=int, help="largest averaging factor")
+    p_xbun.add_argument("--gap-policy", default="segment", choices=GAP_POLICIES)
+    p_xbun.add_argument("--confidence", type=float, default=ONE_SIGMA)
+    p_xbun.add_argument("--edof-method", default="auto", choices=EDOF_METHODS)
+    p_xbun.add_argument("--alpha", type=int, help="assumed power law")
+    p_xbun.add_argument("--spec", action="append", default=[],
+                        metavar="TAU:SIGMA",
+                        help="a datasheet limit, repeatable")
+    p_xbun.add_argument("--bench", help="bench.json, to take the limits from")
+    p_xbun.add_argument("--source", help="which oscillator in --bench")
+    p_xbun.add_argument("--title", default="")
+    p_xbun.add_argument("--subject", default="")
+    p_xbun.add_argument("--operator", default="")
+    p_xbun.add_argument("--notes", default="")
+    p_xbun.add_argument(
+        "--no-data", action="store_true",
+        help="reference the source record by hash instead of copying it in")
+    p_xbun.add_argument("--no-figure", action="store_true")
+    p_xbun.add_argument(
+        "--no-stamp", action="store_true",
+        help="omit the creation time, so two bundles of the same analysis "
+             "are byte-identical")
+    p_xbun.add_argument("--overwrite", action="store_true",
+                        help="write over a directory that already holds one")
+    p_xbun.add_argument("--out", required=True, metavar="DIR")
+    p_xbun.set_defaults(func=_cmd_export_bundle)
+
     p_bench = sub.add_parser(
         "bench", help="the measurement setup: what it can and cannot determine"
     )
@@ -616,6 +654,47 @@ def _cmd_export_table(args) -> int:
     with open(args.out, "w", encoding="utf-8", newline=newline) as fh:
         fh.write(text)
     print(f"wrote {args.out} -- {result.af.size} taus, {args.format} format")
+    return 0
+
+
+def _cmd_export_bundle(args) -> int:
+    """The whole measurement as a directory, with a manifest of its hashes.
+
+    Everything a recipient needs to check the number: the record itself,
+    the curve in two forms, the report, the provenance, and a SHA-256 for
+    each. The analysis is done here and handed to `export.bundle.build`,
+    which computes nothing itself -- so a bundle can never carry options
+    the caller did not choose.
+    """
+    from .export.bundle import build as build_bundle
+    from .registry import get
+    from .report import build as build_report, figure_uri, to_html
+
+    series = _load(args)
+    spec, spec_label = _spec_points(args)
+    grid = _report_grid(args, series, spec)
+    result = get("estimator", args.estimator)(series, taus=grid,
+                                              gap_policy=args.gap_policy,
+                                              keep_coeffs=True)
+    ci = _confidence_for(args, result, series)
+    report = build_report(
+        series, result, ci,
+        title=args.title,
+        subject=args.subject or f"{Path(args.path).name} ({args.estimator})",
+        operator=args.operator, notes=args.notes,
+        spec=spec, spec_label=spec_label,
+    )
+    html = to_html(report, "" if args.no_figure
+                   else figure_uri(result, ci, spec, spec_label))
+
+    bundle = build_bundle(
+        args.out, series, result, ci,
+        report=report, report_html=html, source_path=args.path,
+        include_data=not args.no_data, include_figure=not args.no_figure,
+        stamp=not args.no_stamp, overwrite=args.overwrite,
+    )
+    print(f"wrote {bundle.path} -- {len(bundle.files) + 2} files, "
+          f"verdict {report.verdict.upper()}, digest {bundle.digest[:16]}")
     return 0
 
 
