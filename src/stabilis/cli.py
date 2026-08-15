@@ -386,6 +386,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="one specification point, repeatable. The tau grid is extended "
              "to hit each one exactly, so a limit is never interpolated",
     )
+    p_rep.add_argument(
+        "--mask", action="append", default=[], dest="masks", metavar="NAME",
+        help="judge against a published limit too; repeatable, and "
+             "`stabilis mask --list-masks` shows the catalogue")
     p_rep.add_argument("--bench", help="bench.json to read spec points from")
     p_rep.add_argument(
         "--source", help="which source in --bench carries the specification")
@@ -1515,6 +1519,18 @@ def _report_grid(args, series, spec):
     return np.unique(np.concatenate([base, extra[extra <= base.max()]]))
 
 
+def _masks_from(args):
+    """Resolve `--mask NAME` to catalogue entries, refusing an unknown one."""
+    from .mask import CATALOG, available
+
+    out = []
+    for name in getattr(args, "masks", ()) or ():
+        if name not in CATALOG:
+            raise KeyError(f"no mask {name!r}; available: {available()}")
+        out.append(CATALOG[name])
+    return tuple(out)
+
+
 def _cmd_report(args) -> int:
     """A measurement report: the document a laboratory hands to a customer.
 
@@ -1541,6 +1557,7 @@ def _cmd_report(args) -> int:
 
     report = build(
         series, result, ci,
+        masks=_masks_from(args),
         title=args.title,
         subject=args.subject or f"{Path(args.path).name} ({args.estimator})",
         operator=args.operator,

@@ -141,6 +141,7 @@ class MeasurementReport:
     level: float
     rows: tuple[Row, ...]
     specs: tuple[SpecCheck, ...]
+    masks: tuple[object, ...]
     spec_label: str
     verdict: str
     worst: SpecCheck | None
@@ -272,19 +273,50 @@ def _check_one(tau_spec: float, limit: float, rows: tuple[Row, ...]) -> SpecChec
     )
 
 
-def _overall(specs: tuple[SpecCheck, ...]):
-    """Worst verdict, and the check that earned it.
+def _overall(specs: tuple[SpecCheck, ...], masks=()):
+    """Worst verdict, and the spec check that earned it.
 
     "Worst" is by verdict class first and by guarded margin second, so a
     report on a unit that passes everywhere still names the tau it came
     closest at -- which is the number a customer reads before the verdict.
+
+    Masks contribute to the verdict but not to `worst`, which stays a
+    `SpecCheck`. Each mask carries its own worst point, and flattening two
+    differently-shaped comparisons into one field would lose which document
+    a number came from -- a datasheet claim and a published Recommendation
+    are not interchangeable evidence.
+
+    A mask point that was `not_evaluated` is ignored here for the same
+    reason an unevaluated spec point is: the absence of a comparison is not
+    a pass, and it is not a failure either.
     """
     done = [s for s in specs if s.evaluated]
-    if not done:
+    mask_verdicts = [m.verdict for m in masks if m.verdict != "not_evaluated"]
+    if not done and not mask_verdicts:
         return "none", None
-    verdict = min((s.verdict for s in done), key=VERDICTS.index)
-    worst = min(done, key=lambda s: (VERDICTS.index(s.verdict), s.margin))
-    return verdict, worst
+    worst = (min(done, key=lambda s: (VERDICTS.index(s.verdict), s.margin))
+             if done else None)
+    seen = [s.verdict for s in done] + mask_verdicts
+    return min(seen, key=VERDICTS.index), worst
+
+
+def _check_mask(m, result, ci, series):
+    """One published limit, evaluated against this measurement.
+
+    Refuses rather than quietly computing the statistic the mask wants: a
+    report whose headline estimator is OADEV and whose verdict came from a
+    TDEV curve nobody asked for would be two measurements presented as one.
+    """
+    from ..mask import evaluate
+
+    if m.quantity != result.kind:
+        raise ValueError(
+            f"mask {m.name!r} limits {m.quantity!r} and this report is of a "
+            f"{result.kind!r} curve. Build the report with "
+            f"--estimator {m.quantity}, or drop the mask -- a limit on one "
+            "statistic says nothing about another."
+        )
+    return evaluate(result, m, ci, series)
 
 
 def _record(series) -> dict:
@@ -311,6 +343,7 @@ def build(
     notes: str = "",
     spec=(),
     spec_label: str = "",
+    masks=(),
     fit=None,
     identify_noise: bool = True,
 ) -> MeasurementReport:
@@ -322,6 +355,11 @@ def build(
     `Source.spec_adev` -- and is evaluated only at taus the measurement
     actually visited; see `spec_afs`.
 
+    `masks` is a sequence of `mask.Mask` records -- published limits, as
+    against `spec`'s manufacturer claims. They are evaluated here for the
+    same reason spec points are: which limits apply is the caller's choice,
+    but applying them is not a second analysis.
+
     `ci=None` produces a report with no error bars and therefore no
     conformity verdict, which is the honest outcome for MTIE and TIE rms.
     """
@@ -329,7 +367,8 @@ def build(
     noise = _noise_rows(series, np.asarray(result.af).tolist(), identify_noise)
     rows = _rows(result, ci, noise)
     specs = tuple(_check_one(float(t), float(v), rows) for t, v in spec)
-    verdict, worst = _overall(specs)
+    mask_results = tuple(_check_mask(m, result, ci, series) for m in masks)
+    verdict, worst = _overall(specs, mask_results)
     environment = {
         "stabilis": __version__,
         "numpy": np.__version__,
@@ -343,6 +382,9 @@ def build(
     payload = json.dumps(
         {"rows": [asdict(r) for r in rows],
          "specs": [asdict(s) for s in specs],
+         "masks": [{"mask": m.mask, "verdict": m.verdict,
+                    "checks": [asdict(c) for c in m.checks]}
+                   for m in mask_results],
          "verdict": verdict,
          "estimator": result.kind},
         sort_keys=True,
@@ -357,6 +399,7 @@ def build(
         level=float(ci.level) if ci is not None else float("nan"),
         rows=rows,
         specs=specs,
+        masks=mask_results,
         spec_label=spec_label,
         verdict=verdict,
         worst=worst,

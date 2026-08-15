@@ -104,6 +104,23 @@ measure the channel floor. That is what the bench model is for; see
 *pair*, and saying otherwise is the commonest way a stability measurement
 is misread.
 
+## Two kinds of limit, kept apart
+
+A report can carry both a manufacturer's datasheet claim (`spec`) and a
+published limit (`masks`), and they are rendered in separate tables on
+purpose. Both are limits; they are not interchangeable evidence. A
+datasheet is a supplier's claim about a product, and a Recommendation is a
+requirement an operator has to meet — merging them into one table would let
+a reader lose which is which, and a conformity statement whose provenance
+is ambiguous is worth less than none.
+
+A failing mask fails the whole report: it cannot pass overall while failing
+a limit it was asked to judge against. A mask whose points were all
+`not_evaluated` contributes nothing, for the same reason an unevaluated
+spec point does. See `stabilis docs mask` for how those verdicts are
+reached, including why an extreme-value statistic is judged differently
+from a variance.
+
 ## Validation status
 
 **Validated.** `tests/test_report.py`:

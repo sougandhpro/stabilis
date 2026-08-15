@@ -351,3 +351,116 @@ def test_cli_spec_needs_a_colon(tmp_path):
     data = tmp_path / "dut.dat"
     np.savetxt(data, series.x, fmt="%.17e")
     assert main(["report", str(data), "--rate", "1", "--spec", "1e-12"]) == 1
+
+
+# --------------------------------------------------------------------------
+# Published limits in the report
+# --------------------------------------------------------------------------
+
+
+def _tdev_measurement(h_alpha=1e-20, n=2**13):
+    """A record sampled fast enough for G.811's conditions to be checkable."""
+    from stabilis import confidence, power_law_phase
+    from stabilis.stats import tdev
+
+    series = power_law_phase(n, 0.0, 30.0, np.random.default_rng(2),
+                             h_alpha=h_alpha)
+    result = tdev(series, taus="octave", keep_coeffs=True)
+    return series, result, confidence(result, series=series)
+
+
+def test_a_published_limit_reaches_the_verdict_and_the_page():
+    from stabilis.mask import CATALOG
+
+    series, result, ci = _tdev_measurement()
+    report = build(series, result, ci, masks=(CATALOG["itu-t-g.811-tdev"],))
+    assert len(report.masks) == 1
+    assert report.verdict in ("pass", "fail", "indeterminate")
+
+    html = to_html(report)
+    assert "Conformity against published limits" in html
+    assert "itu-t-g.811-tdev" in html
+    assert report.masks[0].worst is not None
+
+
+def test_a_failing_published_limit_fails_the_whole_report():
+    """A report cannot pass overall while failing a limit it was asked to
+    judge against."""
+    from stabilis.mask import CATALOG
+
+    series, result, ci = _tdev_measurement(h_alpha=1e-12)
+    report = build(series, result, ci, masks=(CATALOG["itu-t-g.811-tdev"],))
+    assert report.masks[0].verdict == "fail"
+    assert report.verdict == "fail"
+
+
+def test_a_datasheet_claim_and_a_published_limit_stay_in_separate_tables():
+    """Both are limits and they are not interchangeable evidence: one is a
+    manufacturer's claim, the other a Recommendation. Merging them would let
+    a reader lose which is which."""
+    from stabilis.mask import CATALOG
+
+    series, result, ci = _tdev_measurement()
+    report = build(series, result, ci, spec=((1.0, 1e-9),),
+                   spec_label="datasheet",
+                   masks=(CATALOG["itu-t-g.811-tdev"],))
+    html = to_html(report)
+    assert "Conformity against datasheet" in html
+    assert "Conformity against published limits" in html
+    assert report.specs and report.masks
+
+
+def test_the_digest_moves_when_a_mask_is_added():
+    """A conformity decision is evidence, so it belongs in the digest."""
+    from stabilis.mask import CATALOG
+
+    series, result, ci = _tdev_measurement()
+    plain = build(series, result, ci)
+    masked = build(series, result, ci, masks=(CATALOG["itu-t-g.811-tdev"],))
+    assert plain.digest != masked.digest
+
+
+def test_a_mask_for_another_statistic_is_refused_rather_than_recomputed():
+    """A report whose headline estimator is TDEV and whose verdict came from
+    an MTIE curve nobody asked for would be two measurements shown as one."""
+    from stabilis.mask import CATALOG
+
+    series, result, ci = _tdev_measurement()
+    with pytest.raises(ValueError, match="--estimator mtie"):
+        build(series, result, ci, masks=(CATALOG["itu-t-g.811-mtie"],))
+
+
+def test_a_mask_only_report_says_where_its_margin_lives():
+    """`worst` stays a SpecCheck, so a mask-only report points the reader at
+    the mask's own section rather than showing an empty banner."""
+    from stabilis.mask import CATALOG
+
+    series, result, ci = _tdev_measurement()
+    report = build(series, result, ci, masks=(CATALOG["itu-t-g.811-tdev"],))
+    assert report.worst is None
+    assert "published limit" in to_html(report)
+
+
+def test_the_mask_json_carries_every_check(tmp_path):
+    from stabilis.mask import CATALOG
+
+    series, result, ci = _tdev_measurement()
+    report = build(series, result, ci, masks=(CATALOG["itu-t-g.811-tdev"],))
+    data = json.loads(to_json(report))
+    assert data["masks"][0]["mask"] == "itu-t-g.811-tdev"
+    assert data["masks"][0]["checks"]
+    assert data["masks"][0]["worst"] is not None
+
+
+def test_cli_report_takes_a_mask(tmp_path, capsys):
+    from stabilis import power_law_phase, save_phase
+    from stabilis.cli import main
+
+    path = tmp_path / "dut.dat"
+    save_phase(power_law_phase(2**13, 0.0, 30.0, np.random.default_rng(2),
+                               h_alpha=1e-20), path)
+    out = tmp_path / "r.html"
+    assert main(["report", str(path), "--estimator", "tdev",
+                 "--mask", "itu-t-g.811-tdev", "--out", str(out)]) == 0
+    assert "Conformity against published limits" in out.read_text()
+    assert "wrote" in capsys.readouterr().out

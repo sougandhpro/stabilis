@@ -36,6 +36,7 @@ th{background:#f5f7fa}
 td.num{text-align:right;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .pass{color:#0a6640;font-weight:600}.fail{color:#a82a2a;font-weight:600}
 .indeterminate{color:#a66321;font-weight:600}.skip{color:#5c7080}
+.not_evaluated{color:#5c7080;font-weight:600}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
 .verdict{padding:.7rem 1rem;border-radius:4px;font-weight:600;margin:1rem 0}
 .v-pass{background:#e8f5ee;color:#0a6640}
@@ -77,7 +78,17 @@ def _pct(x: float) -> str:
 def _banner(report) -> str:
     v = report.verdict
     text = _VERDICT_TEXT[v]
-    if report.worst is None:
+    if report.worst is None and report.masks:
+        # A mask-only report still has a verdict; its closest approach lives
+        # in the mask's own section, since a Recommendation and a datasheet
+        # claim are not interchangeable evidence.
+        judged = [m for m in report.masks if m.verdict != "not_evaluated"]
+        detail = (f"From {len(judged)} published limit(s); see the "
+                  "conformity section below for the margin at each."
+                  if judged else
+                  "No published limit could be evaluated under the "
+                  "measurement conditions it states.")
+    elif report.worst is None:
         detail = ("No specification was supplied, or none could be evaluated "
                   "at a tau this measurement visited.")
     else:
@@ -108,6 +119,54 @@ def _record_table(report) -> str:
     ]
     body = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
     return f"<table>{body}</table>"
+
+
+def _mask_tables(report) -> str:
+    """One section per published limit, each naming the document it came from.
+
+    Kept separate from the specification table on purpose. A manufacturer's
+    datasheet claim and a published Recommendation are both limits, and
+    they are not interchangeable evidence -- merging them into one table
+    would let a reader lose which is which.
+    """
+    if not report.masks:
+        return ""
+    parts = ["<h2>Conformity against published limits</h2>"]
+    for m in report.masks:
+        parts.append(
+            f"<h3>{_esc(m.mask)} &mdash; <span class='{m.verdict}'>"
+            f"{m.verdict.upper().replace('_', ' ')}</span></h3>")
+        parts.append("<table><tr><th>&tau; (s)</th><th>Measured</th>"
+                     "<th>Limit</th><th>Margin</th><th>Verdict</th>"
+                     "<th>Note</th></tr>")
+        for c in m.checks:
+            limit = "&mdash;" if c.limit is None else _g(c.limit, "{:.3e}")
+            margin = "&mdash;" if c.margin is None else f"{c.margin:.2f}&times;"
+            parts.append(
+                f"<tr><td class='num'>{_g(c.tau_s)}</td>"
+                f"<td class='num'>{_g(c.measured, '{:.3e}')}</td>"
+                f"<td class='num'>{limit}</td>"
+                f"<td class='num'>{margin}</td>"
+                f"<td class='{c.verdict}'>"
+                f"{c.verdict.upper().replace('_', ' ')}</td>"
+                f"<td class='sub'>{_esc(c.reason)}</td></tr>")
+        parts.append("</table>")
+        worst = m.worst
+        if worst is not None:
+            parts.append(
+                f"<p class='sub'>Closest approach: {worst.margin:.2f}&times; "
+                f"at &tau; = {_g(worst.tau_s)} s.</p>")
+        else:
+            parts.append("<p class='sub'>No &tau; could be compared with "
+                         "this limit.</p>")
+    parts.append(
+        "<div class='note'><strong>What a published limit adds.</strong> "
+        "These are transcribed from the standards named above, with the "
+        "measurement conditions each states enforced as part of the limit: "
+        "a point measured outside them is reported <em>not evaluated</em> "
+        "rather than passed. A limit is never extrapolated beyond the "
+        "&tau; range its document states.</div>")
+    return "\n".join(parts)
 
 
 def _spec_table(report) -> str:
@@ -333,6 +392,7 @@ def to_html(report, figure_uri: str = "") -> str:
         "<h2>The measurement</h2>",
         _record_table(report),
         spec,
+        _mask_tables(report),
         "<h2>Stability</h2>",
         _rows_table(report),
         _fit_table(report),
@@ -366,6 +426,11 @@ def to_json(report, indent: int = 2) -> str:
             "stats": report.stats,
             "rows": [asdict(r) for r in report.rows],
             "specs": [asdict(s) for s in report.specs],
+            "masks": [{"mask": m.mask, "quantity": m.quantity,
+                       "verdict": m.verdict,
+                       "checks": [asdict(c) for c in m.checks],
+                       "worst": None if m.worst is None else asdict(m.worst)}
+                      for m in report.masks],
             "environment": report.environment,
             "provenance": prov_to_dict(report.provenance),
         },
