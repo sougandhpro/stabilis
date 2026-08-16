@@ -1237,6 +1237,36 @@ each, whose <strong>digest is over the measurement rather than the files</strong
 — hashing the files would have been the obvious choice and is wrong, because
 the provenance embedded in them carries a timestamp and a digest that changes
 every run says nothing.</li>
+<li><strong>Power spectra</strong> — Welch, one-sided, with the window's
+noise-equivalent bandwidth divided out so the result is a density rather than
+a periodogram in disguise; checked by Parseval to twelve digits and by
+recovering a synthesized h<sub>0</sub> at three amplitudes over six decades.
+Two conversions are <em>refused</em> rather than guessed: S<sub>φ</sub>
+without a carrier frequency, since a 10 MHz OCXO and a 10 GHz source give
+identical time-error records at equal fractional stability; and
+ℒ(f) = S<sub>φ</sub>/2 wherever the integrated phase excursion is too large
+for the small-angle limit, which is precisely the near-carrier region a
+datasheet is written from. Two findings came out of the measurements rather
+than the reasoning: the mean is the unbiased statistic and the median sits
+3.4% low at 15 segments, and a cumulative sum is not an ideal integrator —
+the two differ by (πfτ₀)²/sin²(πfτ₀), rising to 2.467 at Nyquist.</li>
+<li><strong>Limit masks with a verdict</strong> — ITU-T G.811 transcribed
+from the Recommendation itself, which changed a number: the widely repeated
+form of its MTIE limit above 1000 s is a flat 300 ns ceiling, and the
+document says 10⁻⁵τ + 0.29 µs, which rises. The <em>measurement conditions</em>
+the standard states are enforced as part of the limit, so a record sampled
+at 1 Hz or shorter than the 12τ it demands returns "not evaluated" rather
+than a green tick. An extreme-value statistic is judged differently from a
+variance: exceeding an MTIE limit fails conclusively without an interval,
+while staying under one is a pass over the measured window only, since a
+longer record can only find a larger maximum.</li>
+<li><strong>Spurs</strong> — found against a running-median floor, then
+<em>measured by fitting the record</em> rather than reading the spectrum, so
+a tone between bins is exact without a flat-top window: 0.001% on amplitude
+and about a nanohertz on frequency. Every table prints its own expected
+false-alarm count from the chi-square tail. Notching records each removed
+tone in the returned series' provenance, because a record with a tone taken
+out describes an oscillator that does not exist.</li>
 </ul>
 
 <h3>Next</h3>
@@ -1256,8 +1286,9 @@ recorded as item 8 of <code>VALIDATION-DEBT.md</code> until it does.</li>
 <li><strong>M4–M8</strong> — the rest of M4 is instrument readers, gated on
 paired vendor exports rather than on effort: a binary format with no public
 specification can only be accepted if the same capture is also available as
-vendor ASCII to check the reader against. Then power spectra and masks,
-realtime ingest with attributed time tagging, and dynamic Allan variance.</li>
+vendor ASCII to check the reader against. The rest of M8 is the interactive
+span selector and the remaining plots. Then realtime ingest with attributed
+time tagging, and dynamic Allan variance.</li>
 </ul>
 
 <div class="note"><strong>Known limitations.</strong> Confidence intervals now

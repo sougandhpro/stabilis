@@ -86,8 +86,8 @@ figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M3 and M5 complete, plus the measurement report, the fitting layer and
-the export layer.** 1196 tests; `stabilis validate` 35/35.
+**M0–M3 and M5 complete, plus the measurement report, the fitting layer,
+the export layer, and most of M8.** 1297 tests; `stabilis validate` 35/35.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -156,8 +156,22 @@ legitimately be quoted. Since then:
   holding the data, the curve, the report and a SHA-256 for each, whose
   digest is over the *measurement* rather than the files — so two copies
   compare in sixteen characters however long apart they were made.
+- **Power spectra** — Welch with the window's noise-equivalent bandwidth
+  divided out, `S_x`/`S_y`/`S_phi` and `L(f)`. The carrier frequency is
+  required rather than assumed, because a spectrum converted with a guessed
+  one is wrong by a constant nothing downstream can detect. `L(f)` is
+  **withheld** where the phase excursion is too large for `L = S_phi/2` —
+  which is exactly the near-carrier region a datasheet gets written from.
+- **Limit masks with a real verdict** — ITU-T G.811 transcribed from the
+  Recommendation itself, with its *measurement conditions* enforced as part
+  of the limit: a record sampled at 1 Hz, or shorter than the `12τ` the
+  standard demands, yields `not evaluated` rather than a green tick.
+- **Spur detection and notching** — tones found against a running-median
+  floor and then measured by fitting the record, so a tone between bins is
+  exact without a flat-top window. Every removal is recorded, because a
+  record with a tone taken out describes an oscillator that does not exist.
 - **Plots** — σ(τ) with asymmetric error bars, power-law slope guides,
-  phase, frequency, and the bench solution.
+  phase, frequency, spectra, `L(f)`, and the bench solution.
 
 Built on top of M0/M1: pure-numpy special functions (regularized incomplete
 gamma, Wichura AS241 normal quantile, chi-square inverse), data-driven
@@ -200,8 +214,8 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — power spectra and masks. Instrument readers wait on paired
-vendor exports.
+**Next** — the remaining M8 output items, then realtime ingest and dynamic
+Allan variance. Instrument readers wait on paired vendor exports.
 
 ## Cross-variances
 
@@ -373,6 +387,43 @@ same input agrees to the last digit the format prints. What no test here
 shows is that Stable32 can *read* what we write — that needs Stable32, and
 it is item 8 of `VALIDATION-DEBT.md` until somebody runs it. See
 `stabilis docs export`.
+
+## Spectra, masks and spurs
+
+```bash
+stabilis psd dut.dat --rate 1 --spectrum S_y
+stabilis psd dut.dat --rate 1 --script-l --nu0 10e6      # L(f) in dBc/Hz
+stabilis mask dut.dat --mask itu-t-g.811-tdev            # exits 1 on failure
+stabilis spur dut.dat --rate 1 --notch-out clean.dat
+```
+
+Three refusals worth knowing about, each because the mistake is invisible
+afterwards.
+
+**`L(f) = S_phi/2` is withheld where it is not true.** It is the
+small-angle limit, and close to the carrier of a noisy source it fails —
+which is exactly the region a datasheet gets written from. Those bins come
+back NaN and the plot leaves a gap rather than joining across it.
+
+**A standard's measurement conditions are part of its limit.** G.811 wants
+a sampling time no coarser than 1/30 s and, for TDEV, a record of at least
+`12τ`. A curve violating either has not been compared with the standard,
+so those points read `not evaluated` — never `pass`. Judging a 1 Hz record
+against G.811 therefore yields no verdict at all, which is the correct
+answer and a more useful one than a confident tick.
+
+**A mask is never extrapolated.** G.811's TDEV limit ends at 10 000 s and
+so does ours; continuing the last segment would invent a requirement and
+attribute it to the ITU. The limits were fetched from the Recommendation
+rather than recalled, which caught one: the widely repeated form of the
+MTIE limit above 1000 s is a flat 300 ns ceiling, and the document says
+`10⁻⁵τ + 0.29 µs`, which rises.
+
+Spur amplitudes are measured by fitting the record rather than reading the
+spectrum, so a tone between bins is exact without a flat-top window —
+0.001 % on amplitude and about a nanohertz on frequency. Notching records
+every tone it removed: a record with a tone taken out describes an
+oscillator that does not exist, and the file has to say so.
 
 ## A GUI, for when flags are tedious
 
