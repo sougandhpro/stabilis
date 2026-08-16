@@ -84,10 +84,28 @@ and `stats/` is forbidden to import it — keeping it a separate import keeps
 that independence visible. `stabilis.report` is the output layer, and its
 figure path wants matplotlib for the same reason as `plot`.
 
+## Documentation
+
+[`docs/README.md`](docs/README.md) is the map. In short:
+
+| Want to know | Read |
+| --- | --- |
+| Why an estimator is defined the way it is | `stabilis docs --list`, then `stabilis docs <topic>` |
+| What a function takes and returns | [`docs/api/index.md`](docs/api/index.md) |
+| What a command does | [`docs/cli-reference.md`](docs/cli-reference.md) |
+| What is proven, and how | `stabilis validate` |
+| What is *not* yet proven | [`VALIDATION-DEBT.md`](VALIDATION-DEBT.md) |
+
+The 36 theory pages ship inside the package, so they survive a `pip
+install` and are readable on a machine that never saw this repository. The
+API and CLI references are generated from the source tree — `python3
+docs/make_api.py` and `python3 docs/make_cli.py` — and a test fails if
+either is stale, so a signature can never drift away from its description.
+
 ## Status
 
 **M0–M3, M5 and M6 complete, plus the measurement report, the fitting
-layer, the export layer, and most of M8.** 1365 tests; `stabilis validate` 38/38.
+layer, the export layer, and most of M8.** 1407 tests; `stabilis validate` 38/38.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:

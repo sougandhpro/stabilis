@@ -193,6 +193,7 @@ def measure(root, measurement, spec: dict, name: str, taus, max_af):
 # ---------------------------------------------------------------------------
 
 def preamble() -> list[str]:
+    """Import lines and setup shared by every generated bench script."""
     return [
         "import numpy as np",
         "import stabilis",

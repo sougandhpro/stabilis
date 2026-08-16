@@ -112,6 +112,8 @@ class Check:
 
 @dataclass(frozen=True)
 class Report:
+    """The whole evidence run: every check, the environment, the digest."""
+
     checks: tuple[Check, ...]
     environment: dict
     seeds: dict
@@ -1330,6 +1332,7 @@ def run(trials: int = MIN_COVERAGE_TRIALS, self_test: bool = False) -> Report:
 
 
 def to_json(report: Report) -> str:
+    """The report as JSON -- the machine-readable evidence artefact."""
     return json.dumps(
         {
             "passed": report.passed,
@@ -1381,6 +1384,7 @@ def _esc(v) -> str:
 
 
 def to_html(report: Report) -> str:
+    """The report as a standalone HTML page, styles included."""
     verdict = ("ok", "PASS") if report.passed else ("bad", "FAIL")
     parts = [
         "<!doctype html><meta charset='utf-8'>",

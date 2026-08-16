@@ -186,6 +186,7 @@ def evaluate(result, mask: Mask, ci=None, series=None) -> MaskResult:
 
 
 def available() -> list[str]:
+    """Names of every mask in the catalogue, sorted."""
     return sorted(CATALOG)
 
 

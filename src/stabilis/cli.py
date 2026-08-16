@@ -49,6 +49,17 @@ _LOG_LEVELS = ("debug", "info", "warning", "error")
 NO_INTERVAL = ("mtie", "tierms", "theo1", "theobr", "theoh")
 
 
+def _summary(fn) -> str:
+    """First docstring line, safe to hand to argparse as help text.
+
+    argparse runs every help string through `%`-formatting, so a bare
+    percent sign in a docstring -- "75 % of the record length" -- is read
+    as a conversion spec and `--help` dies with a TypeError instead of
+    printing. Doubling it is the documented escape.
+    """
+    return fn.__doc__.splitlines()[0].replace("%", "%%")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stabilis", description="Frequency stability analysis."
@@ -107,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("mtie", mtie),
         ("tierms", tierms),
     ):
-        p = sub.add_parser(name, help=fn.__doc__.splitlines()[0])
+        p = sub.add_parser(name, help=_summary(fn))
         _add_input_args(p)
         p.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
         p.add_argument("--max-af", type=int, help="largest averaging factor")
@@ -165,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .stats.wavelet import FILTERS, wdev
 
     p_w = sub.add_parser(
-        "wdev", help=wdev.__doc__.splitlines()[0])
+        "wdev", help=_summary(wdev))
     _add_input_args(p_w)
     p_w.add_argument(
         "--filter", default="haar", choices=sorted(FILTERS),
