@@ -32,6 +32,7 @@ __all__ = [
     "spectrum",
     "script_l",
     "bench_solution",
+    "davar",
     "save",
 ]
 
@@ -261,6 +262,55 @@ def bench_solution(solution, ax=None, channels: bool = True, **kwargs):
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(fontsize="small")
     return ax
+
+
+def davar(surface, ax=None, colorbar: bool = True, cmap: str = "viridis",
+          vmin: float | None = None, vmax: float | None = None, **kwargs):
+    """The dynamic stability surface as a waterfall: time across, tau up.
+
+    Colour is `log10(dev)`, because the deviation spans decades in tau and
+    a linear map would show only the shortest one. NaN cells -- a tau that
+    window could not estimate -- are left unpainted rather than filled, so
+    a hole in the surface reads as a hole.
+
+    Drawn with `pcolormesh` on cell *edges* rather than `imshow`, because
+    the tau axis is logarithmic and geometrically spaced: an image would
+    stretch every cell to the same height and misplace every ridge.
+    """
+    ax = _axes(ax)
+    z = np.log10(np.sqrt(np.where(surface.var > 0.0, surface.var, np.nan))).T
+    mesh = ax.pcolormesh(
+        _edges(surface.t_s), _edges(surface.tau_s, log=True), z,
+        cmap=cmap, vmin=vmin, vmax=vmax, shading="flat", **kwargs,
+    )
+    ax.set_yscale("log")
+    ax.set_xlabel("window centre t (s)")
+    ax.set_ylabel("averaging time tau (s)")
+    ax.set_title(
+        f"{surface.kind} over {surface.window}-sample windows, step {surface.step}"
+    )
+    if colorbar:
+        ax.get_figure().colorbar(mesh, ax=ax, label=f"log10 {surface.kind}")
+    return ax
+
+
+def _edges(centres, log: bool = False):
+    """Cell boundaries around `centres`, for pcolormesh's flat shading.
+
+    Midpoints inside, and the spacing of the first and last pair reflected
+    outward at the ends. Geometric midpoints on a log axis, since the
+    arithmetic mean of 1 and 2 is not where the boundary between the two
+    decade-spaced cells belongs.
+    """
+    c = np.log(np.asarray(centres, dtype=np.float64)) if log \
+        else np.asarray(centres, dtype=np.float64)
+    if c.size == 1:
+        half = 0.5 if log else 0.5 * max(abs(c[0]), 1.0)
+        out = np.array([c[0] - half, c[0] + half])
+    else:
+        mid = 0.5 * (c[:-1] + c[1:])
+        out = np.concatenate(([2 * c[0] - mid[0]], mid, [2 * c[-1] - mid[-1]]))
+    return np.exp(out) if log else out
 
 
 def save(ax, path, dpi: int = 150):

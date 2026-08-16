@@ -81,7 +81,7 @@ ESTIMATORS = [
 ]
 
 # Published so the Monte-Carlo tiers can be repeated by a third party.
-SEEDS = {"coverage": 22, "gaps": 7}
+SEEDS = {"coverage": 22, "gaps": 7, "stream": 3}
 
 # Coverage cannot be measured meaningfully with fewer than this many
 # realizations -- the estimate's own standard error would swamp the effect
@@ -276,7 +276,97 @@ def _identities() -> list[Check]:
         abs(c4 / (np.sqrt(np.pi) / 2) - 1.0) < 1e-15,
     ))
     out.append(_synth_amplitude_identity())
+    out.extend(_streaming_identities())
     return out
+
+
+def _streaming_identities() -> list[Check]:
+    """The two M6 identities: the surface and the accumulator against batch.
+
+    Both are checks that a *different* code path returns what the batch
+    estimator returns, which is the only validation either subsystem can
+    have -- neither Stable32 nor `allantools` publishes a dynamic Allan
+    variance, and a streaming estimator that agreed with a reference table
+    but not with its own batch form would be the wrong kind of right.
+
+    The first is asserted at exactly zero because it is the same call on
+    the same data; the second cannot be, because an accumulator sums
+    sequentially where `np.mean` sums pairwise. See `theory/davar.md` and
+    `theory/stream.md`.
+    """
+    from ..stream import davar, feed, online_avar, online_result, replay
+
+    out = []
+    ps = power_law_phase(4095, 0, 1.0, np.random.default_rng(SEEDS["stream"]), 1e-24)
+    batch = oadev(ps, taus="octave")
+
+    surface = davar(ps, window=ps.n)
+    same = np.array_equal(surface.var[0], batch.var)
+    out.append(Check(
+        "identity", "davar over the whole record is the batch estimator",
+        "A dynamic Allan variance whose window is the entire record must "
+        "be the ordinary overlapping Allan variance of that record. It is "
+        "built by calling the registered estimator on each window rather "
+        "than reimplementing it, so this holds bit for bit -- and any "
+        "shortcut in the windowing (a re-zeroed window, a re-derived tau "
+        "grid) would break exactness while still agreeing to 1e-15.",
+        "exact. Zero difference in every bit of every point; nothing "
+        "looser would detect the failure modes this is here to catch.",
+        f"{surface.af.size} taus, "
+        + ("identical in every bit" if same
+           else f"max rel {np.abs(surface.var[0] / batch.var - 1).max():.2e}"),
+        same,
+    ))
+
+    acc = online_avar(1.0, batch.af)
+    feed(acc, replay(ps.x, 1.0))
+    online = online_result(acc)
+    rel = np.abs(online.var / batch.var - 1.0)
+    ulp = rel.max() / np.finfo(float).eps
+    out.append(Check(
+        "identity", "a replayed stream is the batch estimator",
+        "The record fed sample by sample through the O(max tau) "
+        "accumulator, against the same record analysed in batch. The "
+        "coefficients are bit-identical by construction -- the "
+        "association order is copied from the batch expression -- so what "
+        "is measured here is summation alone: Neumaier-compensated in the "
+        "stream against pairwise in numpy.",
+        "4 ulp, and independent of record length. An uncompensated "
+        "accumulator measures 15 ulp at N = 4096 and 74 at N = 65536, "
+        "growing as O(N); this bound is what distinguishes the two.",
+        f"max {ulp:.2f} ulp over {online.af.size} taus, "
+        f"{int((online.var == batch.var).sum())} of them identical",
+        ulp < 4.0 and np.array_equal(online.n_terms, batch.n_terms),
+    ))
+
+    x = np.array(ps.x)
+    x[900:906] = np.nan
+    rebuilt = _collected(x)
+    exact = np.array_equal(rebuilt, x, equal_nan=True)
+    out.append(Check(
+        "identity", "a stream that drops samples rebuilds them as gaps",
+        "Six samples removed from the stream entirely -- not sent as NaN, "
+        "simply never emitted, which is what a counter does when it fails "
+        "to produce a reading. Placing arriving samples by timestamp must "
+        "return the original record NaN for NaN. Appending them to a list "
+        "instead returns a record six samples shorter, with every later "
+        "sample slid earlier and the whole timebase wrong from there on, "
+        "and it looks *smoother* than the truth.",
+        "exact, including the position of every gap. A count of gaps is "
+        "not enough: the failure this catches produces the right count "
+        "and the wrong timebase.",
+        f"{x.size} slots rebuilt, "
+        + ("every value and every gap in place" if exact else "MISMATCH"),
+        exact,
+    ))
+    return out
+
+
+def _collected(x: np.ndarray) -> np.ndarray:
+    """The record a stream of `x` with its gaps omitted reconstructs."""
+    from ..stream import collect, replay
+
+    return np.asarray(collect(replay(x, 1.0, skip_gaps=True), 1.0).x)
 
 
 def _synth_amplitude_identity() -> Check:

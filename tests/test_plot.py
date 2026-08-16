@@ -239,3 +239,35 @@ def test_script_l_leaves_a_gap_where_it_withheld_a_value():
     assert np.isnan(y).any()                 # NaN is what breaks the line
     assert "withheld" in ax.get_title()
     assert ax.get_ylabel() == "L(f) (dBc/Hz)"
+
+
+def test_davar_is_a_log_tau_mesh_with_unpainted_holes():
+    """A geometric tau axis needs cell edges, not an image's equal rows."""
+    from stabilis.stream import davar
+    from stabilis.types import PhaseSeries
+
+    x = np.array(power_law_freq(2048, 0, rate_hz=1.0,
+                                rng=np.random.default_rng(4),
+                                h_alpha=1e-24).y).cumsum()
+    surface = davar(PhaseSeries(x=x, rate_hz=1.0), window=512, step=128)
+    ax = plot.davar(surface, colorbar=False)
+
+    assert ax.get_yscale() == "log"
+    assert f"{surface.window}-sample windows" in ax.get_title()
+    mesh = ax.collections[0]
+    # One quad per cell, and the colour is log10 of the deviation.
+    assert mesh.get_array().size == surface.var.size
+    finite = np.isfinite(surface.var)
+    assert np.allclose(np.asarray(mesh.get_array()).ravel()[finite.T.ravel()],
+                       np.log10(np.sqrt(surface.var.T[finite.T])))
+
+
+def test_davar_edges_bracket_the_centres_geometrically():
+    """The boundary between decade-spaced cells is not their arithmetic mean."""
+    from stabilis.plot import _edges
+
+    got = _edges(np.array([1.0, 2.0, 4.0]), log=True)
+    assert got.size == 4
+    assert got[1] == pytest.approx(np.sqrt(2.0))
+    assert got[2] == pytest.approx(np.sqrt(8.0))
+    assert got[0] < 1.0 and got[-1] > 4.0

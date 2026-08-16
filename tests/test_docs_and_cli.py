@@ -574,3 +574,151 @@ def test_cli_fit_json_exit_status_is_the_verdict(tmp_path, capsys):
     # The parameters are still in the JSON: a machine reader can see what
     # was rejected, which the human table deliberately does not show.
     assert "sigma_x" in payload["params"]
+
+
+# ---------------------------------------------------------------------------
+# davar and stream
+# ---------------------------------------------------------------------------
+
+def _phase_file(tmp_path, n=2048, seed=17, name="x.txt", timetags=False):
+    """A phase record on disk, optionally with a timetag column."""
+    import numpy as np
+
+    from stabilis.synth import power_law_phase
+
+    p = tmp_path / name
+    x = power_law_phase(n, 0, rate_hz=1.0, rng=np.random.default_rng(seed),
+                        h_alpha=1e-24).x
+    if timetags:
+        np.savetxt(p, np.column_stack([np.arange(x.size), x]), fmt="%d %.17e")
+    else:
+        np.savetxt(p, x, fmt="%.17e")
+    return p
+
+
+def test_cli_davar_prints_one_cut_and_names_the_window(tmp_path, capsys):
+    """A surface is not read in a terminal; a time series at one tau is."""
+    p = _phase_file(tmp_path)
+    assert main(["davar", str(p), "--rate", "1", "--window", "512",
+                 "--step", "256"]) == 0
+    out = capsys.readouterr().out
+    assert "over 7 windows of 512 samples, step 256" in out
+    assert "quiet" in out and "worst" in out
+    rows = [ln for ln in out.splitlines()
+            if ln and not ln.startswith("#") and ln.split()[0][0].isdigit()]
+    assert len(rows) == 7
+
+
+def test_cli_davar_at_af_selects_the_column_and_its_term_count(tmp_path, capsys):
+    p = _phase_file(tmp_path)
+    assert main(["davar", str(p), "--rate", "1", "--window", "512",
+                 "--step", "256", "--at-af", "8"]) == 0
+    out = capsys.readouterr().out
+    assert "at tau = 8 s" in out
+    # 512 samples, af 8 -> 512 - 16 terms, which is not af 1's count.
+    assert " 496" in out
+
+
+def test_cli_davar_rejects_an_averaging_factor_it_did_not_compute(tmp_path, capsys):
+    p = _phase_file(tmp_path)
+    assert main(["davar", str(p), "--rate", "1", "--window", "512",
+                 "--at-af", "3"]) == 1
+    assert "not in this surface" in capsys.readouterr().err
+
+
+def test_cli_davar_json_carries_the_surface_and_the_intervals(tmp_path, capsys):
+    p = _phase_file(tmp_path)
+    assert main(["davar", str(p), "--rate", "1", "--window", "512",
+                 "--step", "256", "--level", "0.6827", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["var"]) == len(payload["t_s"]) == 7
+    assert len(payload["var"][0]) == len(payload["af"])
+    assert payload["level"] == 0.6827
+    assert all(lo < v for lo, v in zip(payload["var_lo"][0], payload["var"][0]))
+    assert "evaluate" in [s["action"] for s in payload["provenance"]["steps"]]
+
+
+def test_cli_davar_over_the_whole_record_is_the_oadev_table(tmp_path, capsys):
+    """The identity, met where a user would meet it."""
+    p = _phase_file(tmp_path, n=1024)
+    assert main(["davar", str(p), "--rate", "1", "--window", "1025",
+                 "--json"]) == 0
+    surface = json.loads(capsys.readouterr().out)
+    assert main(["oadev", str(p), "--rate", "1", "--json"]) == 0
+    curve = json.loads(capsys.readouterr().out)
+    assert surface["af"] == curve["af"]
+    assert [v ** 0.5 for v in surface["var"][0]] == pytest.approx(curve["dev"])
+
+
+def test_cli_stream_matches_the_batch_table(tmp_path, capsys):
+    p = _phase_file(tmp_path, n=1024, timetags=True)
+    assert main(["stream", str(p), "--rate", "1", "--time-column", "0",
+                 "--column", "1", "--expect", "1025", "--json"]) == 0
+    streamed = json.loads(capsys.readouterr().out)
+    assert main(["oadev", str(p), "--rate", "1", "--time-column", "0",
+                 "--column", "1", "--json"]) == 0
+    batch = json.loads(capsys.readouterr().out)
+    assert streamed["af"] == batch["af"]
+    assert streamed["dev"] == pytest.approx(batch["dev"], rel=2e-15)
+    assert streamed["final"] is True
+
+
+def test_cli_stream_needs_a_tau_grid_it_cannot_derive(tmp_path, capsys):
+    """A stream has no length, so neither --af nor --expect is a default."""
+    p = _phase_file(tmp_path, n=256)
+    assert main(["stream", str(p), "--rate", "1"]) == 1
+    assert "--af 1,2,4" in capsys.readouterr().err
+
+
+def test_cli_stream_says_when_a_dropped_sample_would_leave_no_trace(
+        tmp_path, capsys):
+    p = _phase_file(tmp_path, n=256)
+    assert main(["stream", str(p), "--rate", "1", "--af", "1,2,4"]) == 0
+    assert "no timetag column" in capsys.readouterr().out
+
+
+def test_cli_stream_can_report_as_it_goes(tmp_path, capsys):
+    p = _phase_file(tmp_path, n=256, timetags=True)
+    assert main(["stream", str(p), "--rate", "1", "--time-column", "0",
+                 "--column", "1", "--af", "1,2", "--every", "64"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("samples,") >= 4
+
+
+def test_cli_stream_follows_a_growing_file(tmp_path, capsys):
+    import threading
+
+    # power_law_phase(n) returns n+1 phase samples, so the file already
+    # holds slots 0..200 and the appended block must start at 201.
+    p = _phase_file(tmp_path, n=200, timetags=True)
+    tail = "".join(f"{i} {i * 1e-12:.17e}\n" for i in range(201, 261))
+
+    def append():
+        with open(p, "a") as fh:
+            fh.write(tail)
+
+    thread = threading.Thread(target=append)
+    thread.start()
+    code = main(["stream", str(p), "--rate", "1", "--time-column", "0",
+                 "--column", "1", "--af", "1,2,4", "--follow",
+                 "--timeout", "0.4", "--json"])
+    thread.join()
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["n_seen"] == 261
+
+
+def test_cli_stream_takes_its_epoch_from_the_first_timestamp(tmp_path, capsys):
+    """A file whose timetags are absolute seconds is not one huge outage."""
+    import numpy as np
+
+    from stabilis.synth import power_law_phase
+
+    x = power_law_phase(512, 0, rate_hz=1.0, rng=np.random.default_rng(31),
+                        h_alpha=1e-24).x
+    p = tmp_path / "mjd.txt"
+    base = 5.1e9          # MJD 59000 in seconds, near enough
+    np.savetxt(p, np.column_stack([base + np.arange(x.size), x]),
+               fmt="%.6f %.17e")
+    assert main(["stream", str(p), "--rate", "1", "--time-column", "0",
+                 "--column", "1", "--af", "1,2,4", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["n_seen"] == x.size
