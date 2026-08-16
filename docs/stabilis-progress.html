@@ -50,9 +50,9 @@ Stable32 prints — reproduced character for character against its own
 committed exports — and a bundle directory whose digest covers the
 measurement rather than the files that carry it.</p>
 <div class="meta">
-generated 2026-08-15 23:54 UTC &nbsp;·&nbsp; stabilis 0.0.1.dev0 &nbsp;·&nbsp;
+generated 2026-08-16 05:08 UTC &nbsp;·&nbsp; stabilis 0.0.1.dev0 &nbsp;·&nbsp;
 numpy 2.2.6 &nbsp;·&nbsp; python 3.10.12<br>
-commit 2969c94 (61 total) — WORKING TREE DIRTY
+commit 6351e98 (62 total) — WORKING TREE DIRTY
  &nbsp;·&nbsp; every figure below is measured at generation time
 </div>
 <h2>What this is</h2>
@@ -342,9 +342,9 @@ arbitrary code execution. <code>.npy</code> covers the same need safely.</p>
 <h2>Current state</h2>
 
 <div class="kv">
-  <dt>test suite</dt><dd class="mono">[32m[32m[1m1297 passed[0m[32m in 296.30s (0:04:56)[0m[0m &nbsp; <span class="ok">PASS</span></dd>
-  <dt>wall time</dt><dd class="mono">323.2 s</dd>
-  <dt>latest commit</dt><dd class="mono">2969c94 — Find discrete tones, measure them exactly, and remove them loudly</dd>
+  <dt>test suite</dt><dd class="mono">[32m[32m[1m1364 passed[0m[32m in 303.39s (0:05:03)[0m[0m &nbsp; <span class="ok">PASS</span></dd>
+  <dt>wall time</dt><dd class="mono">330.3 s</dd>
+  <dt>latest commit</dt><dd class="mono">6351e98 — Bring the docs back in line with M8, then regenerate</dd>
 </div>
 <p>Three structural properties are enforced by tests rather than convention: the
 core computes with scipy and matplotlib absent; every theory page must declare
@@ -559,12 +559,20 @@ self-consistent and nothing more. The mirror of the rule already in force for
 readers: a writer validated only against its own reader is validated against
 nothing. It closes with one line added to the Stable32 run sheet, and is
 recorded as item 8 of <code>VALIDATION-DEBT.md</code> until it does.</li>
-<li><strong>M4–M8</strong> — the rest of M4 is instrument readers, gated on
-paired vendor exports rather than on effort: a binary format with no public
-specification can only be accepted if the same capture is also available as
-vendor ASCII to check the reader against. The rest of M8 is the interactive
-span selector and the remaining plots. Then realtime ingest with attributed
-time tagging, and dynamic Allan variance.</li>
+<li><strong>No live source has ever run</strong> — the streaming path and the
+dynamic Allan variance are validated by identity against the batch estimator,
+which is the right comparison and an exact one: a replayed record agrees to a
+single ulp, and a whole-record surface is bit-identical. What none of that is,
+is an instrument. <code>replay</code> drives the suite, <code>tail_file</code>
+is tested against a file written by the same process, and the sockets are
+tested on loopback. Item 10 of <code>VALIDATION-DEBT.md</code>; it closes with
+one appending text file from a real rig.</li>
+<li><strong>M4, M7 and the tail of M8</strong> — the rest of M4 is instrument
+readers, gated on paired vendor exports rather than on effort: a binary format
+with no public specification can only be accepted if the same capture is also
+available as vendor ASCII to check the reader against. M7's tail is the
+Howe–Schlossberger gap fill and the total-variance family. The rest of M8 is
+the interactive span selector and the remaining plots.</li>
 </ul>
 
 <div class="note"><strong>Known limitations.</strong> Confidence intervals now

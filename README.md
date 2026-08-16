@@ -86,8 +86,8 @@ figure path wants matplotlib for the same reason as `plot`.
 
 ## Status
 
-**M0–M3 and M5 complete, plus the measurement report, the fitting layer,
-the export layer, and most of M8.** 1297 tests; `stabilis validate` 35/35.
+**M0–M3, M5 and M6 complete, plus the measurement report, the fitting
+layer, the export layer, and most of M8.** 1365 tests; `stabilis validate` 38/38.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -170,8 +170,12 @@ legitimately be quoted. Since then:
   floor and then measured by fitting the record, so a tone between bins is
   exact without a flat-top window. Every removal is recorded, because a
   record with a tone taken out describes an oscillator that does not exist.
+- **Dynamic stability and realtime ingest** — σ(τ) as a *surface* over
+  time, and an Allan variance that runs while the measurement does. See
+  below.
 - **Plots** — σ(τ) with asymmetric error bars, power-law slope guides,
-  phase, frequency, spectra, `L(f)`, and the bench solution.
+  phase, frequency, spectra, `L(f)`, the bench solution, and the dynamic
+  stability surface.
 
 Built on top of M0/M1: pure-numpy special functions (regularized incomplete
 gamma, Wichura AS241 normal quantile, chi-square inverse), data-driven
@@ -214,8 +218,9 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — the remaining M8 output items, then realtime ingest and dynamic
-Allan variance. Instrument readers wait on paired vendor exports.
+**Next** — M7's tail: the Howe–Schlossberger gap fill, and MTOT/TTOT/HTOT.
+Instrument readers wait on paired vendor exports, and binding live sources
+to bench channels waits on a real appending file.
 
 ## Cross-variances
 
@@ -574,6 +579,82 @@ The theory pages are readable from the CLI:
 stabilis docs --list
 stabilis docs avar
 ```
+
+## Was it doing the same thing all along?
+
+```bash
+stabilis davar run.dat --rate 1 --window 1024 --step 256
+```
+
+A single σ(τ) curve presumes the oscillator was stationary. Real ones warm
+up, get bumped, and sit next to an air conditioner. Slide a window along
+the record and evaluate the same estimator inside it, and you get a
+surface instead of a curve.
+
+On 8192 s of white FM with the noise multiplied by five for a thousand
+seconds in the middle, the whole-record `oadev` reports 1.44e-12 at τ = 1 s
+with a clean −1/2 slope — *a white-FM oscillator twice as noisy as this one
+actually is*, describing neither state it was in. The surface says:
+
+```
+         t (s)           oadev
+        2047.5    6.929e-13     <- quiet
+        2815.5    2.273e-12
+        3583.5    3.454e-12     <- the disturbance
+        4351.5    1.578e-12
+        4607.5    6.921e-13     <- recovered
+```
+
+`davar(x, window=len(x))` returns **bit for bit** what `oadev(x)` returns,
+because it *is* that call — the surface is built by evaluating the
+registered estimator on each window rather than reimplementing it, so
+`--estimator ohdev` gives a dynamic Hadamard deviation and a plugin gets
+its own for free.
+
+The literature's O(1) recursion, which adds the entering term and
+subtracts the expiring one, is deliberately not used. It has no
+self-correcting mechanism, and the error it accumulates is **permanent**:
+measured over 200 000 slides, ordinary noise costs 4e-14, one 1 µs phase
+step costs 1.3e-6 *long after the step has left the window*, and a 1 ms
+step — an ordinary counter glitch — leaves the surface 28 % wrong for the
+rest of the measurement, looking exactly like a physical trend.
+`stabilis docs davar` has the table.
+
+## A measurement that has not finished
+
+```bash
+stabilis stream live.dat --rate 1 --time-column 0 --column 1 \
+         --expect 100000 --follow
+```
+
+The overlapping Allan variance maintained sample by sample, in O(max τ)
+memory however long the run lasts. It agrees with the batch estimator to
+**one ulp, flat in record length** — the coefficients are bit-identical
+because the arithmetic's association order is copied from the batch
+expression, and the sum is Neumaier-compensated because an accumulator
+cannot sum pairwise. The same accumulator with a plain running sum drifts
+to 74 ulp at N = 65536.
+
+The load-bearing part is not the arithmetic. It is this:
+
+> **A sample that never arrived becomes a NaN in its own slot. It never
+> becomes the disappearance of a slot.**
+
+Append arriving samples to a list — the obvious implementation — and a
+counter that drops fifty readings hands you a record fifty samples
+shorter and *perfectly smooth*. Every later sample has slid earlier, the
+timebase is wrong from the outage onward, and σ_y(τ) comes back better
+than the oscillator is, with nothing in the data to say so. Samples are
+placed by timestamp instead, and a stream that omits its dropouts entirely
+rebuilds the original record NaN for NaN.
+
+Three things are refused rather than repaired: a timestamp more than a
+quarter-sample off grid (the declared rate is wrong, and placing it anyway
+is interpolation), one that goes backwards or repeats (that would take the
+record's order from the network's scheduling), and an outage too long to
+materialize. And a file with **no timestamp column cannot report a dropped
+sample at all** — so the provenance says the timestamps were synthesized
+and calls the gap count a floor rather than a count.
 
 ## Licence
 

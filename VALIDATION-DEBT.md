@@ -298,6 +298,63 @@ through the existing `Confidence` path rather than a second one.
 
 ---
 
+## 10. No live source has ever run, and the surface has no second opinion
+
+**Status: open, in two halves — one waiting on the user, one permanently
+closed to anyone.**
+
+`stream/` was written after the batch core precisely so that its acceptance
+test could be an identity rather than a comparison, and that identity is
+now measured and strong: a replayed record agrees with `oadev` to **1 ulp,
+flat in record length**, and `davar` over the whole record is **bit
+identical** to the batch call. Everything downstream of the arithmetic —
+gaps, the tau grid, the confidence intervals — is the batch machinery
+reached by the same route, not a parallel implementation.
+
+**What has no evidence at all is the ingest hardware path.** `replay`
+drives the test suite; `tail_file` is tested against a file written by the
+same process; TCP and UDP have loopback tests. None of that is an
+instrument. Three specific things are therefore unmeasured:
+
+* **Whether a real logger's timestamps land on the grid.** `GRID_TOLERANCE`
+  is a quarter of a sample and is a judgement, not a calibration. It has
+  never met a counter's actual jitter, and the refusal it drives is the
+  one an unlucky user meets first.
+* **Whether a real dropout looks like the synthetic one.** The
+  reconstruction test removes samples cleanly. A counter that stalls, or
+  resumes on a shifted timebase, is a different failure and the second
+  case is one `on_grid` cannot detect — it looks like clean data on a
+  clean grid.
+* **`serial` does not exist**, deliberately, and `tcp_lines`/`udp_lines`
+  have never carried an instrument's output. They are listed here rather
+  than in the feature table for that reason.
+
+**How it gets discharged:** an appending text file from the user's rig,
+which is already item 3 of the plan's "needed from the user" list, run
+through `stabilis stream --follow` beside the same file analysed in batch.
+The two must agree to the ulp figure above; if they do not, the difference
+is the evidence.
+
+**The half that cannot close** is the same shape as items 5 and 7: neither
+Stable32 nor `allantools` publishes a dynamic Allan variance, so there is
+no table to differ from and no second implementation to differ with.
+`allantools` appears to have a realtime module, and under this repo's
+licence position it may be called as a numeric oracle but not read — that
+differential test has not been written and would be the one available
+external check on the streaming path. It is cheap and it is not done.
+
+Also unmeasured, and narrower: **the per-window intervals on a DAVAR
+surface are not simultaneous**. Each is correct for its own window, and a
+surface of many windows at 68.3 % each will show excursions outside the
+band somewhere with near certainty; adjacent windows overlapping by
+`1 - step/window` of their terms make those excursions come in runs.
+`theory/davar.md` says so and the bands must not be read as a detection
+threshold. A simultaneous band would need the window-to-window correlation
+this library does compute for τ (`stats/taucov.py`) applied along the other
+axis — real work, and not yet done.
+
+---
+
 ## Not debt
 
 For the avoidance of doubt, these are *already* validated and are not

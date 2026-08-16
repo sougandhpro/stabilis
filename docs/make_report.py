@@ -1283,12 +1283,20 @@ self-consistent and nothing more. The mirror of the rule already in force for
 readers: a writer validated only against its own reader is validated against
 nothing. It closes with one line added to the Stable32 run sheet, and is
 recorded as item 8 of <code>VALIDATION-DEBT.md</code> until it does.</li>
-<li><strong>M4–M8</strong> — the rest of M4 is instrument readers, gated on
-paired vendor exports rather than on effort: a binary format with no public
-specification can only be accepted if the same capture is also available as
-vendor ASCII to check the reader against. The rest of M8 is the interactive
-span selector and the remaining plots. Then realtime ingest with attributed
-time tagging, and dynamic Allan variance.</li>
+<li><strong>No live source has ever run</strong> — the streaming path and the
+dynamic Allan variance are validated by identity against the batch estimator,
+which is the right comparison and an exact one: a replayed record agrees to a
+single ulp, and a whole-record surface is bit-identical. What none of that is,
+is an instrument. <code>replay</code> drives the suite, <code>tail_file</code>
+is tested against a file written by the same process, and the sockets are
+tested on loopback. Item 10 of <code>VALIDATION-DEBT.md</code>; it closes with
+one appending text file from a real rig.</li>
+<li><strong>M4, M7 and the tail of M8</strong> — the rest of M4 is instrument
+readers, gated on paired vendor exports rather than on effort: a binary format
+with no public specification can only be accepted if the same capture is also
+available as vendor ASCII to check the reader against. M7's tail is the
+Howe–Schlossberger gap fill and the total-variance family. The rest of M8 is
+the interactive span selector and the remaining plots.</li>
 </ul>
 
 <div class="note"><strong>Known limitations.</strong> Confidence intervals now

@@ -15,8 +15,8 @@ th{background:#f5f7fa}
 .note{background:#f5f7fa;border-left:3px solid #8a9ba8;padding:.6rem 1rem;margin:1rem 0}
 </style>
 <h1>stabilis validation report</h1>
-<p class='sub'>Generated 2026-08-14T23:21:39+00:00 &middot; digest <span class='mono'>82e8bd3746c15fe8…</span></p>
-<div class='verdict ok'>PASS &mdash; 35 of 35 checks passed</div>
+<p class='sub'>Generated 2026-08-16T05:02:49+00:00 &middot; digest <span class='mono'>467ccf4c5a0fb591…</span></p>
+<div class='verdict ok'>PASS &mdash; 38 of 38 checks passed</div>
 <div class='note'><strong>Why this document exists.</strong> ISO/IEC 17025:2017 clause 7.11.2 requires software to be validated by the laboratory. NOTE 2 exempts commercial software in general use; a new open-core tool fails that twice over, so this evidence is what makes adoption possible rather than a nicety. Every claim below states its tolerance and the reason for it.</div>
 <h2>Analytic identities</h2><p class='sub'>Machine precision, no external data. Correctness lives here.</p>
 <table><tr><th>Check</th><th>Claim</th><th>Tolerance and why</th><th>Measured</th><th></th></tr>
@@ -30,6 +30,9 @@ th{background:#f5f7fa}
 <tr><td>chi2_ppf(p, 2) = -2 ln(1-p)</td><td>The one chi-square quantile with a closed form. Validates the inverse-CDF iteration against arithmetic that needs no iteration.</td><td>1e-13 relative. Two orders looser than machine precision because the inversion terminates on the CDF rather than on the quantile, and the density carries that difference across.</td><td class='mono'>rel 4.44e-16</td><td class='pass'>PASS</td></tr>
 <tr><td>deviation bias c4(2) = sqrt(pi)/2</td><td>E[sigma_hat]/sigma at two degrees of freedom, the closed form that quantifies the 11.4% shortfall of the last ADEV point.</td><td>1e-15 relative. Both sides reduce to elementary constants, so nothing here should cost more than an ulp.</td><td class='mono'>0.8862269255, rel 1.11e-16</td><td class='pass'>PASS</td></tr>
 <tr><td>synthesizer amplitude against its exact closed forms</td><td>The generator's E[avar] computed from its impulse response, against the closed forms for white FM, white PM and random-walk FM. Fixes h_alpha as a calibrated quantity in SI units rather than an arbitrary scale -- without this the power-law decomposition has no end-to-end test, only a structural one.</td><td>1e-10 relative. All three are exact identities, not asymptotic limits: the random-walk form carries its 1/(2 m^2) discrete correction explicitly, which is 50% at m = 1.</td><td class='mono'>worst deviation 1.11e-16 over three power laws and m = 1..16</td><td class='pass'>PASS</td></tr>
+<tr><td>davar over the whole record is the batch estimator</td><td>A dynamic Allan variance whose window is the entire record must be the ordinary overlapping Allan variance of that record. It is built by calling the registered estimator on each window rather than reimplementing it, so this holds bit for bit -- and any shortcut in the windowing (a re-zeroed window, a re-derived tau grid) would break exactness while still agreeing to 1e-15.</td><td>exact. Zero difference in every bit of every point; nothing looser would detect the failure modes this is here to catch.</td><td class='mono'>11 taus, identical in every bit</td><td class='pass'>PASS</td></tr>
+<tr><td>a replayed stream is the batch estimator</td><td>The record fed sample by sample through the O(max tau) accumulator, against the same record analysed in batch. The coefficients are bit-identical by construction -- the association order is copied from the batch expression -- so what is measured here is summation alone: Neumaier-compensated in the stream against pairwise in numpy.</td><td>4 ulp, and independent of record length. An uncompensated accumulator measures 15 ulp at N = 4096 and 74 at N = 65536, growing as O(N); this bound is what distinguishes the two.</td><td class='mono'>max 0.50 ulp over 11 taus, 10 of them identical</td><td class='pass'>PASS</td></tr>
+<tr><td>a stream that drops samples rebuilds them as gaps</td><td>Six samples removed from the stream entirely -- not sent as NaN, simply never emitted, which is what a counter does when it fails to produce a reading. Placing arriving samples by timestamp must return the original record NaN for NaN. Appending them to a list instead returns a record six samples shorter, with every later sample slid earlier and the whole timebase wrong from there on, and it looks *smoother* than the truth.</td><td>exact, including the position of every gap. A count of gaps is not enough: the failure this catches produces the right count and the wrong timebase.</td><td class='mono'>4096 slots rebuilt, every value and every gap in place</td><td class='pass'>PASS</td></tr>
 </table>
 <h2>Certified values</h2><p class='sub'>Against exact rational arithmetic computed by an independent implementation that the production path is forbidden to import.</p>
 <table><tr><th>Check</th><th>Claim</th><th>Tolerance and why</th><th>Measured</th><th></th></tr>
@@ -73,6 +76,6 @@ th{background:#f5f7fa}
 <tr><td>python</td><td class='mono'>3.10.12</td></tr>
 <tr><td>platform</td><td class='mono'>Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.35</td></tr>
 <tr><td>monte_carlo_trials</td><td class='mono'>800</td></tr>
-<tr><td>seeds</td><td class='mono'>{'coverage': 22, 'gaps': 7}</td></tr>
-<tr><td>digest</td><td class='mono'>82e8bd3746c15fe879391d563a61461a4dfdcbfa42c91269c1dda6baffc222af</td></tr>
+<tr><td>seeds</td><td class='mono'>{'coverage': 22, 'gaps': 7, 'stream': 3}</td></tr>
+<tr><td>digest</td><td class='mono'>467ccf4c5a0fb59169fe9c325550059af75e8e56d5a42d03622dc50fc0f90941</td></tr>
 </table>
