@@ -146,6 +146,8 @@ through a submodule path may move.
 | [`FH_DEPENDENT`](core.md#fh_dependent) | constant | `stabilis.powerlaw_coeffs` | Rows whose coefficient depends on the measurement bandwidth. Only the unmodified Allan rows for the two PM noises. |
 | [`figure_uri`](report.md#figure_uri) | function | `stabilis.report.figure` | A sigma-tau PNG as `data:image/png;base64,...`, or "" if unavailable. |
 | [`file_sha256`](core.md#file_sha256) | function | `stabilis.provenance` | Hex SHA-256 of a file, read in chunks so large records are fine. |
+| [`fill_gaps`](core.md#fill_gaps) **root** | function | `stabilis.impute` | Fill every gap in a frequency record, and say which samples were made up. |
+| [`FILTER_EFOLD`](core.md#filter_efold) | constant | `stabilis.impute` | The `2**3` of the paper's eq. 3, as an e-folding in cycles per sample. See `_lowpass` for why it is a pure number here and not a function of tau0. |
 | [`FILTERS`](stats.md#filters) | constant | `stabilis.stats.wavelet` | Filter families by name, keyed to the number of vanishing moments K. The length is 2K, so Haar is the two-tap K=1 case. |
 | [`fit`](fitting.md#fit) **root** | function | `stabilis.fitting.core` | Fit `model` to the sigma-tau curve in `result`. |
 | [`FitResult`](fitting.md#fitresult) **root** | class | `stabilis.fitting.core` | Fitted parameters, two accounts of how well they are known, and why. |
@@ -194,6 +196,7 @@ through a submodule path may move.
 | [`limit_at`](core.md#limit_at) | function | `stabilis.mask` | The limit at `tau`, or None where the mask does not reach. |
 | [`list_topics`](core.md#list_topics) | function | `stabilis.docs` | Topic names, without the .md suffix, sorted. |
 | [`listing`](gui.md#listing) | function | `stabilis.gui.files` | Directories and plausible data files at `rel`, for the picker. |
+| [`live_terms`](core.md#live_terms) **root** | function | `stabilis.impute` | How many of each tau's terms were computed from live data alone. |
 | [`LMResult`](fitting.md#lmresult) | class | `stabilis.fitting.lm` | Where the optimizer stopped, and why. |
 | [`load`](bench.md#load) | function | `stabilis.bench.store` | Read a bench. `verify_hashes=True` refuses if any file has changed. |
 | [`load_bench`](gui.md#load_bench) | function | `stabilis.gui.bench` | Read a `bench.json` from under the root, for editing in the page. |

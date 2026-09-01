@@ -55,6 +55,7 @@ from ..stats.core import StabilityResult
 from ..stats.edof import eta1
 from ..stats.greenhall import greenhall_edof
 from ..stats.wavelet import modwt, wavelet_variance
+from ..impute import fill_gaps
 from ..synth import power_law_freq, power_law_phase
 from ..types import FreqSeries, PhaseSeries
 from .expected import expected_avar, expected_wvar, wavelet_kernel
@@ -631,6 +632,7 @@ def _coverage(trials: int) -> list[Check]:
     out += _greenhall_against_truth(ensembles, trials, truth_se)
     out.append(_h_alpha_round_trip(ensembles, trials))
     out.append(_wavelet_level_against_exact_expectation(trials))
+    out.append(_imputer_against_the_published_criterion(trials))
     out.append(_decomposition_round_trip(trials))
     out.append(_bench_hat_round_trip())
     out.append(_cross_sees_under_the_instrument(trials))
@@ -1062,6 +1064,65 @@ def _h_alpha_round_trip(ensembles, trials: int) -> Check:
         f"({se:.0%} at {trials} trials), for m up to N/16.",
         f"worst deviation {worst:.1%} over three power laws",
         worst < bound,
+    )
+
+
+def _imputer_against_the_published_criterion(trials: int) -> Check:
+    """Howe & Schlossberger's own figure of merit, on their own scenario.
+
+    513 points, samples 250-400 removed (29% dead time), the gap filled by
+    the Total Imputer, and the fraction of trials in which the filled
+    AVAR's 90% interval overlaps the original's. Their Fig. 4 publishes
+    that count for each of the four noise types.
+
+    **The counts themselves are not comparable and are not scored as such.**
+    The criterion's strictness is set entirely by the confidence interval,
+    and the paper does not state its EDOF convention; it also uses the
+    non-overlapping powers-of-two AVAR of its eq. 1, whose intervals at
+    long tau are wide enough to pass almost anything. What is scored is the
+    *structure* of their result, which is what a broken implementation does
+    not reproduce -- filling the phase record instead of the frequency
+    samples inverts it, and takes random-walk FM from 100 trials in 100 to
+    3. See theory/impute.md.
+    """
+    # 100 trials is what the paper ran. Below that the counts are too
+    # granular for the ordering to mean anything, so this row does not
+    # scale down with `trials` the way the coverage rows do.
+    n = max(trials // 4, 60)
+    order = []
+    for alpha in (2, 0, -1, -2):
+        rng = np.random.default_rng(SEEDS["coverage"] + alpha)
+        hits = None
+        for _ in range(n):
+            fs = power_law_freq(513, alpha, rate_hz=1.0, rng=rng, h_alpha=1e-22)
+            y = fs.y.copy()
+            y[250:400] = np.nan
+            filled, _ = fill_gaps(FreqSeries(y, rate_hz=1.0), reason="validate")
+            a = confidence(oadev(fs, taus="octave"), level=0.90)
+            b = confidence(oadev(filled, taus="octave"), level=0.90)
+            hit = (a.var_lo <= b.var_hi) & (b.var_lo <= a.var_hi)
+            hits = hit.astype(int) if hits is None else hits + hit
+        order.append(hits / n)
+    wpm, wfm, ffm, rwfm = (float(h[-3:].mean()) for h in order)
+    short = min(float(h[:3].min()) for h in order)
+    ok = (wpm < wfm < ffm <= rwfm) and rwfm > 0.9 and wpm < 0.5 and short >= 0.95
+    return Check(
+        "coverage", "gap imputer against the published acceptance criterion",
+        "Howe & Schlossberger 2022 Fig. 4, reproduced: 513-point records "
+        "with samples 250-400 removed (29% dead time), filled by the Total "
+        "Imputer, scored on the fraction of trials whose filled 90% AVAR "
+        "interval overlaps the original's. Run with the *overlapping* "
+        "estimator, which is tighter than the paper's eq. 1 and so a harder "
+        "test than the one published.",
+        "the published ordering, at the last three octaves of tau: white PM "
+        "worst, then white FM, then flicker FM, then random-walk FM above "
+        "0.9 and white PM below 0.5; and every noise type at or above 0.95 "
+        "for the first three octaves. The counts are not asserted against "
+        "the figure, because the paper does not state the EDOF behind its "
+        "intervals.",
+        f"long tau wpm {wpm:.2f} < wfm {wfm:.2f} < ffm {ffm:.2f} <= rwfm "
+        f"{rwfm:.2f}; worst short tau {short:.2f} ({n} trials)",
+        ok,
     )
 
 

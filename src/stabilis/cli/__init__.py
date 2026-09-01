@@ -19,6 +19,7 @@ from .estimators import add_estimators, add_wdev
 from .export import add_export
 from .fitting import add_fit
 from .gui import add_gui
+from .impute import add_impute
 from .mask import add_mask
 from .multi import add_cross, add_reject
 from .plot import add_plot
@@ -50,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_docs(sub)
     add_validate(sub)
     add_stats(sub)
+    add_impute(sub)
     add_estimators(sub)
     add_wdev(sub)
     add_compare_edof(sub)

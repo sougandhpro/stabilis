@@ -103,7 +103,7 @@ Whichever route, ask the installed package what it is rather than assuming:
 
 ```bash
 python3 -c "import stabilis; print(stabilis.__version__)"
-stabilis validate                     # 40/40, and a digest over the evidence
+stabilis validate                     # 41/41, and a digest over the evidence
 ```
 
 `stabilis validate` is the honest check that a remote machine got a working
@@ -172,7 +172,7 @@ either is stale, so a signature can never drift away from its description.
 ## Status
 
 **M0–M3, M5 and M6 complete, plus the measurement report, the fitting
-layer, the export layer, and most of M8.** 1468 tests; `stabilis validate` 40/40.
+layer, the export layer, and most of M8.** 1491 tests; `stabilis validate` 41/41.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -306,9 +306,44 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — M7's tail: the Howe–Schlossberger gap fill, and MTOT/TTOT/HTOT.
-Instrument readers wait on paired vendor exports, and binding live sources
-to bench channels waits on a real appending file.
+**Next** — M7's tail: MTOT/TTOT/HTOT. Instrument readers wait on paired
+vendor exports, and binding live sources to bench channels waits on a real
+appending file.
+
+## Gap filling
+
+```bash
+stabilis impute run.dat --kind frequency --rate 1 \
+    --reason "receiver reboot 04:12" --out filled.dat --mask-out imputed.txt
+```
+
+Howe & Schlossberger's *Total Imputer*. Interpolating across a gap inserts
+an interval containing **no noise**, so ADEV improves precisely because
+data was invented. This fills instead with real measured data — the
+preceding run, reversed, spliced with a slope matched on a low-pass-filtered
+copy — so the filled samples carry the true noise process.
+
+Three things it does that a fill usually does not:
+
+- **it requires a reason**, records the imputed fraction as a warning
+  rather than a note, and hands back the mask of what it made up. The
+  authors ask that gaps and their cause be stated with the results, and a
+  default reason would let that slide;
+- **imputed samples buy no degrees of freedom.** Imputation raises the
+  naive EDOF — the paper measures up to 6× for white noise — so
+  `confidence(result, live_terms=live_terms(result, mask))` scales η by the
+  fraction of terms free of invented data. Where no term is free, **no
+  interval is quoted at all**: a χ² quantile at zero degrees of freedom is
+  not a wide interval, it is no interval;
+- **it refuses** a gap reaching either end of the record (trim it instead —
+  it bridges nothing), a gap wider than the live data on either side, and a
+  phase record, because the phase *across* a gap is not in the data even
+  once the frequency samples are.
+
+Validated against the paper's own Fig. 4 acceptance criterion. Two printed
+ambiguities had to be resolved in code and both are argued in
+`theory/impute.md` — including which series it fills, which is settled by
+measurement: on phase, random-walk FM comes back **74× high**.
 
 ## Cross-variances
 

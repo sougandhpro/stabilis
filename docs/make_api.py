@@ -79,6 +79,7 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
 # implementation detail rather than public surface.
 CORE_MODULES = (
     "types", "provenance", "log", "registry", "tau", "preprocess", "edit",
+    "impute",
     "synth", "mask", "powerlaw_coeffs", "reference", "docs",
 )
 SKIP_MODULES = ("cli", "_nnls", "_specfun")

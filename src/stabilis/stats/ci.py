@@ -193,6 +193,7 @@ def confidence(
     alpha=None,
     series=None,
     run_policy: str = "pool",
+    live_terms=None,
 ) -> Confidence:
     """Confidence interval for every tau of a stability result.
 
@@ -207,6 +208,17 @@ def confidence(
     supplied, and both the assumed law and any point where the method was
     declined come back on the result and go into provenance. `auto` never
     selects it -- see edof.py.
+
+    `live_terms` is for a record whose gaps were filled. Imputation
+    manufactures terms, and the paper it comes from measures the resulting
+    EDOF inflation at up to 6x for white noise -- an interval computed from
+    the filled term count is too narrow, and wrongly so in the optimistic
+    direction. Pass `impute.live_terms(result, mask)` and every eta is
+    scaled by the fraction of its terms that touched no imputed sample.
+    Where that fraction is zero the interval is **not** computed: NaN
+    bounds and a named warning, because at that tau every term this
+    estimate rests on contains invented data and there is no honest error
+    bar to print. See theory/impute.md.
     """
     if not result.is_variance:
         raise ValueError(
@@ -263,7 +275,31 @@ def confidence(
 
 
     eta = np.asarray(etas, dtype=np.float64)
-    lo, hi = chi2_interval(result.var, eta, level)
+    live, starved = None, ()
+    if live_terms is not None:
+        live = np.asarray(live_terms, dtype=np.float64)
+        if live.shape != eta.shape:
+            raise ValueError(
+                f"confidence: live_terms has {live.size} entries but the "
+                f"result has {eta.size} taus. It must be the per-tau live "
+                "count for *this* result -- impute.live_terms(result, mask)")
+        if np.any(live > result.n_terms):
+            raise ValueError(
+                "confidence: live_terms exceeds n_terms at some tau, so it "
+                "is not a count of this result's own terms")
+        eta = eta * live / result.n_terms
+        starved = tuple(int(m) for m, k in zip(result.af.tolist(), live) if k == 0)
+
+    if np.all(eta > 0.0):
+        lo, hi = chi2_interval(result.var, eta, level)
+    else:
+        # chi2_ppf has no answer at eta = 0 and should not be asked for one:
+        # the quantile of a chi-square with no degrees of freedom is not a
+        # wide interval, it is no interval. Evaluate the taus that have one.
+        ok = eta > 0.0
+        lo = np.full(eta.shape, np.nan)
+        hi = np.full(eta.shape, np.nan)
+        lo[ok], hi[ok] = chi2_interval(result.var[ok], eta[ok], level)
     fell_back = sum(1 for h in used if h != method and method != "auto")
     prov = record(
         result.provenance,
@@ -278,9 +314,22 @@ def confidence(
             "alpha_assumed": None if alphas is None else alphas.tolist(),
             "run_policy": run_policy if method == "greenhall" else None,
             "declined": sorted({d for d in declined if d}),
+            "live_term_fraction": None if live is None else
+                float(np.sum(live) / np.sum(result.n_terms)),
+            "no_live_terms_at_af": list(starved),
         },
-        f"{eta.size} intervals" + (f", {fell_back} fell back" if fell_back else ""),
+        f"{eta.size} intervals" + (f", {fell_back} fell back" if fell_back else "")
+        + (f", no interval at af {list(starved)}: every term there rests on "
+           "imputed data" if starved else ""),
     )
+    if starved:
+        prov = warn(
+            prov, "stats.ci", "confidence",
+            {"no_live_terms_at_af": list(starved)},
+            f"at af {list(starved)} every term contains imputed samples, so "
+            "the degrees of freedom are zero and no interval is quoted. The "
+            "point estimate is still there; it just has no error bar that "
+            "is not made of invented data.")
     return Confidence(
         level=level,
         edof=eta,

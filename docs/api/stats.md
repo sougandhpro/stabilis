@@ -277,7 +277,7 @@ Lower deviation bound. Monotone, so coverage is preserved.
 #### `confidence`
 
 ```python
-confidence(result: StabilityResult, level: float=ONE_SIGMA, method: str='auto', alpha=None, series=None, run_policy: str='pool') -> Confidence
+confidence(result: StabilityResult, level: float=ONE_SIGMA, method: str='auto', alpha=None, series=None, run_policy: str='pool', live_terms=None) -> Confidence
 ```
 
 Confidence interval for every tau of a stability result.
@@ -293,6 +293,17 @@ assumes a power law; `alpha` and `series` are how that assumption gets
 supplied, and both the assumed law and any point where the method was
 declined come back on the result and go into provenance. `auto` never
 selects it -- see edof.py.
+
+`live_terms` is for a record whose gaps were filled. Imputation
+manufactures terms, and the paper it comes from measures the resulting
+EDOF inflation at up to 6x for white noise -- an interval computed from
+the filled term count is too narrow, and wrongly so in the optimistic
+direction. Pass `impute.live_terms(result, mask)` and every eta is
+scaled by the fraction of its terms that touched no imputed sample.
+Where that fraction is zero the interval is **not** computed: NaN
+bounds and a named warning, because at that tau every term this
+estimate rests on contains invented data and there is no honest error
+bar to print. See theory/impute.md.
 
 ---
 

@@ -11,6 +11,8 @@ Series types, provenance, the tau grid, editing and synthesis -- everything that
   <br>`list_topics`, `read_topic`, `topic_summary`
 - **`stabilis.edit`** -- Choosing what part of a record to analyse, and what to throw away.
   <br>`BY`, `MJD_EPOCH_UNIX`, `select_range`, `drop_outliers`, `summary`, `parse_expression`, `combine`
+- **`stabilis.impute`** -- The Total Imputer: filling gaps with real data instead of invented data.
+  <br>`FILTER_EFOLD`, `fill_gaps`, `live_terms`
 - **`stabilis.log`** -- Logging that doubles as the audit trail.
   <br>`get_logger`, `configure`, `record`, `warn`
 - **`stabilis.mask`** -- Limit masks, and the verdict a unit gets against one.
@@ -183,6 +185,133 @@ The column `expression` describes, from a table of columns.
 result NaN at that sample, which is what should happen: a difference is
 unknown wherever either side is. That falls out of the arithmetic, and
 is stated because relying on it is deliberate rather than incidental.
+
+---
+
+## `stabilis.impute`
+
+The Total Imputer: filling gaps with real data instead of invented data.
+
+D. A. Howe and N. Schlossberger, "Characterizing Frequency Stability
+Measurements Having Multiple Data Gaps," *IEEE Trans. UFFC* **69**(2),
+468-472, Feb. 2022, doi:10.1109/TUFFC.2021.3137425. Open copy at
+`tf.nist.gov/general/pdf/3150.pdf`.
+
+**Why this is separate from `edit.py`.** That module *removes* data; this
+one *manufactures* it. They are the two directions of the same
+metrological hazard and they should not share a page: an auditor reading
+`edit.py` is asking what was thrown away, and an auditor reading this is
+asking what was never measured. This is the only module in the library that
+invents samples, and it is named for that.
+
+**The idea.** Interpolation, zero-padding and adjoining live segments all
+fail the same way: they insert an interval containing *no stochastic
+noise*, so ADEV improves precisely because data was invented, and the
+methods destabilize above roughly 10% dead time. Howe and Schlossberger
+fill a gap with real measured data, **reflected and inverted** -- the same
+extension that defines TOTVAR, applied to an interior gap rather than to
+the record ends. The filled samples are drawn from the true noise process
+and carry its correlation structure, so the method has no upper dead-time
+limit in principle.
+
+**Licence position: clean-room from the paper.** The authors' reference
+implementation (`github.com/nkschlos/time-series-imputation`, also Zenodo
+5594587) carries **no licence file at all**, so it is all-rights-reserved
+and must not be vendored, ported or copied. Nothing here was read from it.
+The published description is sufficient, and where it is ambiguous the
+reading taken is argued in the docstring rather than guessed -- see
+`_lowpass` and `theory/impute.md`.
+
+**Frequency samples, not phase -- and that was settled by measurement.**
+The paper is loose about which series it fills: Section II motivates the
+extension through TOTVAR, which is a phase construction, while its own
+eq. 1 defines AVAR over `y` data and calls the record "the number of y
+data". Implemented on phase, the reversal flips the sign of the frequency
+at the seam, and for random-walk FM -- where `y` wanders slowly and a sign
+flip is a large excursion -- `AVAR(tau0)` came out **74x high** and the
+paper's own overlap criterion fell to 3 trials in 100. Implemented on the
+frequency samples it is 100 in 100, and the published ranking of Fig. 4
+falls out in order: random-walk FM best, then flicker FM, then white FM,
+with white PM the failing case at long tau. Reversing `y` preserves a
+random walk's continuity where reversing `x` destroys it. See
+`theory/impute.md` for the numbers.
+
+A gapped `PhaseSeries` is refused rather than converted, because the phase
+*across* a gap is not recoverable even once the frequency samples are: a
+counter that stopped and resumed carries an unknown phase step, and
+integrating imputed frequencies through the gap would assert it was zero.
+That is exactly the assumption `preprocess.segments` exists to avoid making
+silently.
+
+**What the paper asks of anyone using it, quoted.** "The imputation
+algorithm in the link above is not meant to be used as a substitute for a
+measurement deficiency. Analysts should take seriously their measurement
+methodologies to eliminate gaps if at all feasible. If that is not possible
+or practical, the presence of gaps and the reason for them should be
+clearly stated along with the analysis results." `fill_gaps` therefore
+requires a `reason`, records the imputed fraction in provenance, and
+returns the mask so that the confidence interval can refuse to count
+invented samples as degrees of freedom (`live_terms`).
+
+#### `FILTER_EFOLD`
+
+```python
+FILTER_EFOLD = 8.0
+```
+
+The `2**3` of the paper's eq. 3, as an e-folding in cycles per sample. See `_lowpass` for why it is a pure number here and not a function of tau0.
+
+#### `fill_gaps`
+
+```python
+fill_gaps(series, reason: str) -> tuple[FreqSeries, np.ndarray]
+```
+
+Fill every gap in a frequency record, and say which samples were made up.
+
+Returns `(filled, imputed)` -- the record with no gaps left, and the
+boolean mask of the samples this function invented. **Keep the mask.**
+It is what `live_terms` needs to stop the confidence interval counting
+imputed samples as degrees of freedom, and the paper measures that
+inflation at up to 6x for white noise.
+
+The multi-gap order is the paper's, and it is not arbitrary -- it always
+imputes outward from the most trustworthy data. Find the longest
+contiguous run; fill the gaps to its right, left to right, to the end of
+the record; then reverse the record and do the same, which reaches the
+beginning.
+
+`reason` is required and goes into provenance, because the paper asks
+that "the presence of gaps and the reason for them should be clearly
+stated along with the analysis results" and a default would let that
+slide.
+
+#### `live_terms`
+
+```python
+live_terms(result, imputed: np.ndarray) -> np.ndarray
+```
+
+How many of each tau's terms were computed from live data alone.
+
+A term at offset `t` spans `span_factor * m` phase samples, so it is
+live exactly when `imputed[t : t + span_factor*m]` holds nothing. The
+count is what `confidence(..., live_terms=...)` deflates the degrees of
+freedom by.
+
+**Why zero and not a discount.** An imputed sample is real measured
+data, but it is real measured data that is *already in the record* --
+the extension is a reflection of live samples the estimator has
+counted once. It carries no independent information, so a term that
+touches one contributes no degrees of freedom. The paper reports EDF
+rising by up to 6x under extension and treats that as a benefit; for a
+confidence interval it is the opposite, and an interval computed from
+the filled term count is too narrow in the optimistic direction.
+
+Requires the estimator to have run on the *filled* record, where the
+terms are contiguous. On a gapped record they are not -- `n_terms`
+falling short is indistinguishable from a shorter record -- and this
+would silently mis-align.
 
 ---
 

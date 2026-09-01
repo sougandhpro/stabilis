@@ -115,19 +115,28 @@ filling (M7).
 
 ## Gap filling
 
-Deferred to M7, deliberately. Filling is not free: linear interpolation
-inserts an interval containing no noise, which pulls ADEV *low* at τ
-comparable to the gap. The estimate looks better precisely because data was
-invented.
+**Implemented, in `impute.py`. See `theory/impute.md`** — this section is
+the summary and that page is the argument.
 
-The method to be implemented is Howe & Schlossberger's *Total Imputer*,
-which fills with real measured data — the preceding run, reflected and
-inverted, spliced with a slope matched on a low-pass-filtered copy — so the
-filled samples carry the true noise process rather than none. Until then,
-`gap_policy="segment"` is the honest default. Note that imputation *raises*
-the equivalent degrees of freedom, by up to 6× for white noise, so a
-confidence interval computed from filled data is too narrow unless the
-imputed samples are excluded from the EDOF count.
+Filling is not free: linear interpolation inserts an interval containing no
+noise, which pulls ADEV *low* at τ comparable to the gap. The estimate
+looks better precisely because data was invented.
+
+`impute.fill_gaps` is Howe & Schlossberger's *Total Imputer*, which fills
+with real measured data — the preceding run, reversed, spliced with a slope
+matched on a low-pass-filtered copy — so the filled samples carry the true
+noise process rather than none. It fills the **frequency** samples; a
+gapped `PhaseSeries` is refused, because the phase across a gap is not in
+the data even once the frequencies are imputed.
+
+**`gap_policy="segment"` remains the default, and filling is never
+automatic.** It is a separate call, it requires a `reason`, and it warns.
+
+Imputation *raises* the equivalent degrees of freedom, by up to 6× for
+white noise, so a confidence interval computed from filled data is too
+narrow. `impute.live_terms(result, mask)` counts the terms free of imputed
+samples and `confidence(result, live_terms=…)` scales η by that fraction;
+where no term is free, no interval is quoted at all.
 
 ## References
 

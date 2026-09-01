@@ -62,6 +62,7 @@ from .io import (  # noqa: E402
     save_phase,
 )
 from .edit import drop_outliers, select_range, summary  # noqa: E402
+from .impute import fill_gaps, live_terms  # noqa: E402
 from .preprocess import basic_stats  # noqa: E402
 from .stats import (  # noqa: E402
     ONE_SIGMA,
@@ -124,6 +125,8 @@ __all__ = [
     "select_range",
     "drop_outliers",
     "summary",
+    "fill_gaps",
+    "live_terms",
     # estimators
     "adev",
     "oadev",

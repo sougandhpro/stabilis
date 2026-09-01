@@ -13,6 +13,7 @@ The library API is documented separately, in [api/index.md](api/index.md).
 | [`stabilis docs`](#stabilis-docs) | read the theory pages |
 | [`stabilis validate`](#stabilis-validate) | run the validation evidence report |
 | [`stabilis stats`](#stabilis-stats) | basic statistics for a data file |
+| [`stabilis impute`](#stabilis-impute) | Fill every gap in a frequency record, and say which samples were made up. |
 | [`stabilis adev`](#stabilis-adev) | Non-overlapping Allan deviation. See theory/avar.md. |
 | [`stabilis oadev`](#stabilis-oadev) | Overlapping Allan deviation. See theory/avar.md. |
 | [`stabilis mdev`](#stabilis-mdev) | Modified Allan deviation. See theory/mvar.md. |
@@ -53,16 +54,18 @@ The library API is documented separately, in [api/index.md](api/index.md).
 
 ```
 usage: stabilis [-h] [--version] [--log-level {debug,info,warning,error}]
-                {docs,validate,stats,adev,oadev,mdev,tdev,ohdev,totdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
+                {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
                 ...
 
 Frequency stability analysis.
 
 positional arguments:
-  {docs,validate,stats,adev,oadev,mdev,tdev,ohdev,totdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
+  {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
     docs                read the theory pages
     validate            run the validation evidence report
     stats               basic statistics for a data file
+    impute              Fill every gap in a frequency record, and say which samples
+                        were made up.
     adev                Non-overlapping Allan deviation. See theory/avar.md.
     oadev               Overlapping Allan deviation. See theory/avar.md.
     mdev                Modified Allan deviation. See theory/mvar.md.
@@ -163,6 +166,40 @@ options:
                         override delimiter sniffing
   --gap-value GAP_VALUE
                         value marking a gap (Stable32 writes 0; not assumed)
+  --json                emit JSON
+```
+
+## `stabilis impute`
+
+Fill every gap in a frequency record, and say which samples were made up..
+
+```
+usage: stabilis impute [-h] [--kind {phase,frequency}] [--rate RATE] [--column COLUMN]
+                       [--time-column TIME_COLUMN] [--delimiter DELIMITER]
+                       [--gap-value GAP_VALUE] --reason REASON [--out OUT]
+                       [--mask-out MASK_OUT] [--digits DIGITS] [--json]
+                       path
+
+positional arguments:
+  path                  input data file
+
+options:
+  -h, --help            show this help message and exit
+  --kind {phase,frequency}
+                        whether the column holds phase in seconds or fractional
+                        frequency
+  --rate RATE           sample rate in Hz
+  --column COLUMN       data column, 0-based
+  --time-column TIME_COLUMN
+                        timetag column, to infer --rate
+  --delimiter DELIMITER
+                        override delimiter sniffing
+  --gap-value GAP_VALUE
+                        value marking a gap (Stable32 writes 0; not assumed)
+  --reason REASON       why the gaps exist; required, and recorded
+  --out OUT             write the filled frequency record here
+  --mask-out MASK_OUT   write the imputed mask here, one 0 or 1 per line
+  --digits DIGITS       significant digits in --out (default: 17, round-trip)
   --json                emit JSON
 ```
 

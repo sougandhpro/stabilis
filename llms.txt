@@ -112,6 +112,12 @@ These are design decisions, not bugs. Fighting them produces wrong numbers.
   NaN to the end of a record, so one missing sample silently discards the
   rest. Frequency input carrying a gap *refuses* `gap_policy="mask"`
   outright. Take the refusal rather than routing around it.
+- **Filling a gap never narrows an error bar.** `fill_gaps` returns the mask
+  of what it invented; pass `live_terms(result, mask)` to `confidence` and η
+  is scaled by the fraction of terms free of imputed data. Where no term is
+  free, no interval is quoted. Do not compute a plain `confidence` on a
+  filled record and report it — imputation inflates the naive EDOF by up to
+  6× and the interval comes out too narrow in the optimistic direction.
 - **A gap value is never assumed.** Stable32 writes `0` for a gap, which is
   also a legitimate measurement; pass `gap_value=` explicitly if the file
   uses that convention.
