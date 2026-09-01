@@ -15,24 +15,24 @@ from pathlib import Path
 
 import numpy as np
 
-from . import __version__
-from .docs import list_topics, read_topic, topic_summary
-from .fitting import DEFAULT_BOOTSTRAP, OBJECTIVES
-from .log import configure
-from .preprocess import basic_stats
-from .provenance import to_dict
-from .stats import ONE_SIGMA, confidence
-from .stats.core import GAP_POLICIES
-from .stats.edof import EDOF_METHODS
-from .stats.greenhall import GREENHALL_RUN_POLICIES
-from .gui import DEFAULT_PORT as GUI_DEFAULT_PORT
-from .export import TABLE_FORMATS
-from .io.write import FORMATS, TIME_COLUMNS
-from .stats.powerlaw import WEIGHT_METHODS
-from .stats.psd import DETRENDS, KINDS as PSD_KINDS
-from .stats.window import WINDOWS
-from .stream.davar import STEP_DIVISOR
-from .tau import MODES
+from .. import __version__
+from ..docs import list_topics, read_topic, topic_summary
+from ..fitting import DEFAULT_BOOTSTRAP, OBJECTIVES
+from ..log import configure
+from ..preprocess import basic_stats
+from ..provenance import to_dict
+from ..stats import ONE_SIGMA, confidence
+from ..stats.core import GAP_POLICIES
+from ..stats.edof import EDOF_METHODS
+from ..stats.greenhall import GREENHALL_RUN_POLICIES
+from ..gui import DEFAULT_PORT as GUI_DEFAULT_PORT
+from ..export import TABLE_FORMATS
+from ..io.write import FORMATS, TIME_COLUMNS
+from ..stats.powerlaw import WEIGHT_METHODS
+from ..stats.psd import DETRENDS, KINDS as PSD_KINDS
+from ..stats.window import WINDOWS
+from ..stream.davar import STEP_DIVISOR
+from ..tau import MODES
 
 __all__ = ["main", "build_parser"]
 
@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats.add_argument("--json", action="store_true", help="emit JSON")
     p_stats.set_defaults(func=_cmd_stats)
 
-    from .stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, theobr,
+    from ..stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, theobr,
                     theoh, tierms, totdev)
 
     for name, fn in (
@@ -173,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     # wdev gets its own parser rather than a place in the loop above: its
     # scales are dyadic by construction, so --taus and --max-af have nothing
     # to act on, and the MODWT masks gaps rather than choosing a policy.
-    from .stats.wavelet import FILTERS, wdev
+    from ..stats.wavelet import FILTERS, wdev
 
     p_w = sub.add_parser(
         "wdev", help=_summary(wdev))
@@ -727,7 +727,7 @@ def _add_input_args(p: argparse.ArgumentParser,
 
 def _load(args):
     """Read the input file into a PhaseSeries or FreqSeries."""
-    from .io import load_frequency, load_phase
+    from ..io import load_frequency, load_phase
 
     loader = load_phase if args.kind == "phase" else load_frequency
     return loader(
@@ -748,8 +748,8 @@ def _cmd_mask(args) -> int:
     MTIE, and letting the two be selected independently would let them be
     mismatched.
     """
-    from .mask import CATALOG, available, evaluate
-    from .registry import get
+    from ..mask import CATALOG, available, evaluate
+    from ..registry import get
 
     if args.list_masks:
         for name in available():
@@ -815,8 +815,8 @@ def _cmd_spur(args) -> int:
     a least-squares fit to the samples, which is exact for a tone that fell
     between bins and needs no flat-top window to be so.
     """
-    from .stats.psd import welch
-    from .stats.spur import detect, notch
+    from ..stats.psd import welch
+    from ..stats.spur import detect, notch
 
     series = _load(args)
     spec = welch(series, nperseg=args.nperseg)
@@ -851,7 +851,7 @@ def _cmd_spur(args) -> int:
                       f"{sp.rms:>13.4e}  {sp.excess_db:>11.1f}  {unit}")
 
     if args.notch_out:
-        from .io import save_frequency, save_phase
+        from ..io import save_frequency, save_phase
 
         if not table.spurs:
             raise ValueError("no tones were found, so there is nothing to "
@@ -873,7 +873,7 @@ def _cmd_psd(args) -> int:
     `theory/psd.md` gives the identity that ties this module's output to
     `powerlaw.py`'s coefficients.
     """
-    from .stats.psd import convert, script_l, welch
+    from ..stats.psd import convert, script_l, welch
 
     series = _load(args)
     spec = welch(series, nperseg=args.nperseg, overlap=args.overlap,
@@ -942,7 +942,7 @@ def _cmd_davar(args) -> int:
     read one. The cut is a time series at a single averaging factor, which
     is the form an event shows up in; `--json` gives the rest.
     """
-    from .stream import davar
+    from ..stream import davar
 
     series = _load(args)
     surface = davar(series, window=args.window, step=args.step,
@@ -998,10 +998,10 @@ def _cmd_stream(args) -> int:
     answer to a couple of ulp, which is the other point. See
     theory/stream.md.
     """
-    from .stream import (feed, online_avar, online_push, online_result,
+    from ..stream import (feed, online_avar, online_push, online_result,
                          parse_lines, tail_file)
-    from .stream.collect import on_grid
-    from .tau import averaging_factors
+    from ..stream.collect import on_grid
+    from ..tau import averaging_factors
 
     if args.af:
         afs = [int(v) for v in args.af.split(",") if v.strip()]
@@ -1073,7 +1073,7 @@ def _cmd_export_data(args) -> int:
     `stable32` format drops all of that, because the tools it is aimed at
     were not asked to tolerate our comments.
     """
-    from .io import save_frequency, save_phase
+    from ..io import save_frequency, save_phase
 
     series = _load(args)
     save = save_phase if args.kind == "phase" else save_frequency
@@ -1096,8 +1096,8 @@ def _cmd_export_table(args) -> int:
     Same library calls the estimator subcommands make, so an exported table
     and a printed one can never disagree.
     """
-    from .export import to_csv, to_json, to_stable32
-    from .registry import get
+    from ..export import to_csv, to_json, to_stable32
+    from ..registry import get
 
     series = _load(args)
     estimator = get("estimator", args.estimator)
@@ -1134,9 +1134,9 @@ def _cmd_export_bundle(args) -> int:
     which computes nothing itself -- so a bundle can never carry options
     the caller did not choose.
     """
-    from .export.bundle import build as build_bundle
-    from .registry import get
-    from .report import build as build_report, figure_uri, to_html
+    from ..export.bundle import build as build_bundle
+    from ..registry import get
+    from ..report import build as build_report, figure_uri, to_html
 
     series = _load(args)
     spec, spec_label = _spec_points(args)
@@ -1221,7 +1221,7 @@ def _cmd_validate(args) -> int:
     makes the report usable as a gate in a lab's own qualification pipeline
     rather than only as something to read.
     """
-    from .validate import run, to_html, to_json
+    from ..validate import run, to_html, to_json
 
     report = run(trials=args.trials, self_test=args.self_test)
 
@@ -1304,7 +1304,7 @@ def _print_result(args, result, ci, header: str) -> int:
     if args.json:
         # One implementation of the result schema, in `export.table`, so the
         # command line and the library file cannot drift apart.
-        from .export import to_json as result_json
+        from ..export import to_json as result_json
 
         print(result_json(result, ci))
         return 0
@@ -1352,7 +1352,7 @@ def _cmd_wdev(args) -> int:
     the same number: `wdev --filter haar` and `oadev` agree at every shared
     tau, bounds included. The `--filter` column is where they part company.
     """
-    from .stats.wavelet import FILTERS, wdev
+    from ..stats.wavelet import FILTERS, wdev
 
     series = _load(args)
     want_ci = not args.no_confidence
@@ -1378,7 +1378,7 @@ def _cmd_compare_edof(args) -> int:
     assumption is doing the work, and a metrologist deciding which number
     to put on a certificate should be able to see that in one table.
     """
-    from .registry import get
+    from ..registry import get
 
     series = _load(args)
     result = get("estimator", args.estimator)(
@@ -1438,10 +1438,10 @@ def _cmd_powerlaw(args) -> int:
     fit is a non-negative least squares, so no level ever comes back
     negative and the solution carries an optimality certificate.
     """
-    from .powerlaw_coeffs import ALPHAS
-    from .stats import mdev, oadev
-    from .stats.powerlaw import decompose
-    from .synth import ALPHA_NAMES
+    from ..powerlaw_coeffs import ALPHAS
+    from ..stats import mdev, oadev
+    from ..stats.powerlaw import decompose
+    from ..synth import ALPHA_NAMES
 
     series = _load(args)
     curves = [oadev(series, taus=args.taus, max_af=args.max_af),
@@ -1512,8 +1512,8 @@ def _cmd_fit(args) -> int:
     the correlation between taus, and the one that ignores it. Their ratio
     is what the correlation was costing.
     """
-    from .fitting import fit as run_fit
-    from .registry import get as registry_get
+    from ..fitting import fit as run_fit
+    from ..registry import get as registry_get
 
     series = _load(args)
     curve = registry_get("estimator", args.estimator)(
@@ -1618,7 +1618,7 @@ def _cmd_cross(args) -> int:
     print as `--` in the deviation column, because there is no deviation
     there and a number would invite one to be read.
     """
-    from .multi import cross_variance
+    from ..multi import cross_variance
 
     a = _load(args)
     column_b = args.column if args.column_b is None else args.column_b
@@ -1677,7 +1677,7 @@ def _cmd_reject(args) -> int:
     channels of one capture; per-file delimiters and units are the bench
     stage's job, not this one's.
     """
-    from .multi import cross_matrix, dataset, reject
+    from ..multi import cross_matrix, dataset, reject
 
     paths = [args.path, *args.extra]
     series = {}
@@ -1758,7 +1758,7 @@ def _spec_points(args):
     if args.bench:
         if not args.source:
             raise ValueError("--bench needs --source to say which oscillator")
-        from .bench import load
+        from ..bench import load
 
         bench = load(args.bench)
         matches = [s for s in bench.sources if s.id == args.source]
@@ -1783,8 +1783,8 @@ def _report_grid(args, series, spec):
     not evaluated, which is the honest outcome for a limit stated at a tau
     the record cannot support.
     """
-    from .tau import averaging_factors
-    from .report import spec_afs
+    from ..tau import averaging_factors
+    from ..report import spec_afs
 
     base = averaging_factors(series.n, args.taus, args.max_af)
     if not spec or base.size == 0:
@@ -1795,7 +1795,7 @@ def _report_grid(args, series, spec):
 
 def _masks_from(args):
     """Resolve `--mask NAME` to catalogue entries, refusing an unknown one."""
-    from .mask import CATALOG, available
+    from ..mask import CATALOG, available
 
     out = []
     for name in getattr(args, "masks", ()) or ():
@@ -1813,8 +1813,8 @@ def _cmd_report(args) -> int:
     confidence interval, not on the point estimate, so a record too short
     to decide says so instead of guessing.
     """
-    from .registry import get
-    from .report import build, figure_uri, to_html, to_json
+    from ..registry import get
+    from ..report import build, figure_uri, to_html, to_json
 
     series = _load(args)
     spec, spec_label = _spec_points(args)
@@ -1824,8 +1824,8 @@ def _cmd_report(args) -> int:
 
     fit = None
     if args.decompose:
-        from .stats import mdev
-        from .stats.powerlaw import decompose
+        from ..stats import mdev
+        from ..stats.powerlaw import decompose
 
         fit = decompose([result, mdev(series, taus=grid)])
 
@@ -1862,15 +1862,15 @@ def _cmd_report(args) -> int:
 
 def _cmd_plot(args) -> int:
     """Draw one file. The only subcommand that needs matplotlib."""
-    from . import plot as plotting
-    from .registry import get
+    from .. import plot as plotting
+    from ..registry import get
 
     series = _load(args)
     if args.draw == "phase":
-        from .stats.core import as_phase
+        from ..stats.core import as_phase
         ax = plotting.phase(as_phase(series), label=Path(args.path).name)
     elif args.draw == "frequency":
-        from .types import to_frequency
+        from ..types import to_frequency
         fs = series if hasattr(series, "y") else to_frequency(series)
         ax = plotting.frequency(fs, label=Path(args.path).name)
     else:
@@ -1901,7 +1901,7 @@ def _cmd_plot(args) -> int:
 
 def _cmd_gui(args) -> int:
     """Serve the local page. Blocks until interrupted."""
-    from .gui import serve
+    from ..gui import serve
 
     serve(port=args.port, root=args.root, open_browser=not args.no_browser)
     return 0
@@ -1913,8 +1913,8 @@ def _cmd_bench_check(args) -> int:
     Worth running while the experiment is still being planned, which is the
     only time the answer -- "go and measure B against D" -- is cheap.
     """
-    from .bench import check
-    from .bench.store import load
+    from ..bench import check
+    from ..bench.store import load
 
     ident = check(load(args.path))
     if args.json:
@@ -1942,8 +1942,8 @@ def _cmd_bench_recommend(args) -> int:
     its own, or the hat once a repeated edge has removed the channel term.
     A bench that neither closes is still a 2, the same as `bench check`.
     """
-    from .bench import load
-    from .bench.recommend import recommend
+    from ..bench import load
+    from ..bench.recommend import recommend
 
     bench = load(args.path, verify_hashes=False)
     rec = recommend(bench)
@@ -1969,10 +1969,10 @@ def _cmd_bench_recommend(args) -> int:
 
 def _cmd_bench_solve(args) -> int:
     """The N-cornered hat, channel floors and the common-mode warnings."""
-    from .bench.solve import solve
-    from .bench.store import load
-    from .io import load_frequency, load_phase
-    from .registry import get
+    from ..bench.solve import solve
+    from ..bench.store import load
+    from ..io import load_frequency, load_phase
+    from ..registry import get
 
     bench = load(args.path, verify_hashes=not args.no_verify)
     base = Path(args.path).parent
@@ -2049,6 +2049,3 @@ def main(argv: list[str] | None = None) -> int:
         print(f"stabilis: {exc}", file=sys.stderr)
         return 1
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
