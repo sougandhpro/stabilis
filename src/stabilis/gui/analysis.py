@@ -6,7 +6,7 @@ the library will accept, hands it to `stats/`, and flattens what comes back
 into parallel arrays the canvas can plot.
 
 **Nothing here computes a statistic.** Every variance, degree of freedom and
-confidence bound comes from the library, through the same calls `cli.py`
+confidence bound comes from the library, through the same calls `cli/`
 makes, which is what stops the page and the command line from being able to
 disagree about a number. There is a test that runs the recipe this module
 prints, by hand, and demands identical output.

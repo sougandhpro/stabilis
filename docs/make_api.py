@@ -72,8 +72,10 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
      "The request handling behind `stabilis gui`."),
 )
 
-# Root-level modules that belong on the `core` page. `cli.py` is documented
-# by docs/make_cli.py instead, and the leading-underscore modules are
+# Root-level modules that belong on the `core` page. `cli/` is documented
+# by docs/make_cli.py instead -- `_group_of` returns None for anything
+# dotted `cli.*`, so its submodules stay out too -- and the
+# leading-underscore modules are
 # implementation detail rather than public surface.
 CORE_MODULES = (
     "types", "provenance", "log", "registry", "tau", "preprocess", "edit",

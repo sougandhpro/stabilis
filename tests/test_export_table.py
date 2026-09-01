@@ -140,7 +140,7 @@ def test_the_reason_a_point_declined_survives_into_the_json():
 def test_the_command_line_json_is_the_export_json(tmp_path, capsys):
     """The proof the duplication is gone.
 
-    `cli._print_result` used to build this payload by hand. Two hand-built
+    `cli.estimators._print_result` used to build this payload by hand. Two hand-built
     schemas for one object drift, and the one nobody looks at drifts first.
     """
     from stabilis.cli import main

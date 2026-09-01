@@ -839,7 +839,7 @@ def test_nothing_in_the_library_imports_the_page(server):
     built -- so `import stabilis.cli` loads the whole page package for one
     integer. That is a real wart, and naming it here is better than the
     older wording, which claimed the import was inside the command function
-    and was not true of `cli.py` either. What the exemption buys is that
+    and was not true of the old `cli.py` either. What the exemption buys is that
     every *other* module in the package is now proved not to reach the page;
     the single blanket exemption for a 2054-line file proved nothing.
     """
