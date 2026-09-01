@@ -16,10 +16,8 @@ from pathlib import Path
 import numpy as np
 
 from .. import __version__
-from ..docs import list_topics, read_topic, topic_summary
 from ..fitting import DEFAULT_BOOTSTRAP, OBJECTIVES
 from ..log import configure
-from ..preprocess import basic_stats
 from ..provenance import to_dict
 from ..stats import ONE_SIGMA, confidence
 from ..stats.core import GAP_POLICIES
@@ -35,6 +33,9 @@ from ..stream.davar import STEP_DIVISOR
 from ..tau import MODES
 from .common import (NO_INTERVAL, _add_input_args, _confidence_for,
                      _load, _nan_to_none, _summary)
+from .docs import add_docs
+from .preprocess import add_stats
+from .validate import add_validate
 
 __all__ = ["main", "build_parser"]
 
@@ -54,34 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_docs = sub.add_parser("docs", help="read the theory pages")
-    p_docs.add_argument("topic", nargs="?", help="topic name, e.g. noise-types")
-    p_docs.add_argument(
-        "--list", action="store_true", dest="list_topics", help="list all topics"
-    )
-    p_docs.set_defaults(func=_cmd_docs)
-
-    p_val = sub.add_parser("validate", help="run the validation evidence report")
-    p_val.add_argument("--out", help="write an HTML report to this path")
-    p_val.add_argument("--json", action="store_true", help="emit JSON to stdout")
-    p_val.add_argument(
-        "--trials",
-        type=int,
-        default=300,
-        help="Monte-Carlo depth; raised to 300 if lower (default: 300, "
-        "published figures use 800)",
-    )
-    p_val.add_argument(
-        "--self-test",
-        action="store_true",
-        help="inject a check designed to fail, proving the report can",
-    )
-    p_val.set_defaults(func=_cmd_validate)
-
-    p_stats = sub.add_parser("stats", help="basic statistics for a data file")
-    _add_input_args(p_stats)
-    p_stats.add_argument("--json", action="store_true", help="emit JSON")
-    p_stats.set_defaults(func=_cmd_stats)
+    add_docs(sub)
+    add_validate(sub)
+    add_stats(sub)
 
     from ..stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, theobr,
                     theoh, tierms, totdev)
@@ -932,7 +908,7 @@ def _cmd_stream(args) -> int:
     theory/stream.md.
     """
     from ..stream import (feed, online_avar, online_push, online_result,
-                         parse_lines, tail_file)
+                          parse_lines, tail_file)
     from ..stream.collect import on_grid
     from ..tau import averaging_factors
 
@@ -1099,83 +1075,10 @@ def _cmd_export_bundle(args) -> int:
     return 0
 
 
-def _cmd_docs(args) -> int:
-    if args.list_topics or args.topic is None:
-        for topic in list_topics():
-            print(f"  {topic:<16} {topic_summary(topic)}")
-        return 0
-    try:
-        sys.stdout.write(read_topic(args.topic))
-    except KeyError as exc:
-        print(exc.args[0], file=sys.stderr)
-        return 2
-    return 0
 
 
-def _cmd_stats(args) -> int:
-    series = _load(args)
-    values = series.x if args.kind == "phase" else series.y
-    stats = basic_stats(values)
-
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "stats": stats,
-                    "rate_hz": series.rate_hz,
-                    "tau0_s": series.tau0_s,
-                    "duration_s": series.duration_s,
-                    "provenance": to_dict(series.provenance),
-                },
-                indent=2,
-                default=str,
-            )
-        )
-        return 0
-
-    unit = "s" if args.kind == "phase" else ""
-    print(f"file      {args.path}")
-    print(f"kind      {args.kind}")
-    print(f"n         {stats['n']}  ({stats['n_gaps']} gaps)")
-    print(f"tau0      {series.tau0_s:.9g} s   rate {series.rate_hz:.9g} Hz")
-    print(f"duration  {series.duration_s:.9g} s")
-    print(f"min       {stats['min']:.9e} {unit}")
-    print(f"max       {stats['max']:.9e} {unit}")
-    print(f"mean      {stats['mean']:.9e} {unit}")
-    print(f"median    {stats['median']:.9e} {unit}")
-    print(f"std       {stats['std']:.9e} {unit}   (descriptive only, see docs gaps)")
-    return 0
 
 
-def _cmd_validate(args) -> int:
-    """Run the validation hierarchy and emit the evidence report.
-
-    Exit status is the verdict: 0 if every check passed, 1 otherwise. That
-    makes the report usable as a gate in a lab's own qualification pipeline
-    rather than only as something to read.
-    """
-    from ..validate import run, to_html, to_json
-
-    report = run(trials=args.trials, self_test=args.self_test)
-
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as fh:
-            fh.write(to_html(report))
-    if args.json:
-        print(to_json(report))
-    else:
-        for check in report.checks:
-            mark = "pass" if check.passed else "FAIL"
-            print(f"[{mark}] {check.tier:<10} {check.name}")
-            print(f"         {check.measured}")
-        passed = sum(c.passed for c in report.checks)
-        print(
-            f"\n{'PASS' if report.passed else 'FAIL'}: {passed}/"
-            f"{len(report.checks)} checks   digest {report.digest[:16]}"
-        )
-        if args.out:
-            print(f"report written to {args.out}")
-    return 0 if report.passed else 1
 
 
 def _step_params(result, action: str) -> dict:
