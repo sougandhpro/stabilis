@@ -25,18 +25,18 @@ from ..stats.edof import EDOF_METHODS
 from ..export import TABLE_FORMATS
 from ..io.write import FORMATS, TIME_COLUMNS
 from ..stats.powerlaw import WEIGHT_METHODS
-from ..stats.psd import DETRENDS, KINDS as PSD_KINDS
-from ..stats.window import WINDOWS
 from ..stream.davar import STEP_DIVISOR
 from ..tau import MODES
-from .common import (NO_INTERVAL, _add_input_args, _confidence_for,
-                     _load, _nan_to_none)
+from .common import _add_input_args, _confidence_for, _load, _nan_to_none
 from .docs import add_docs
 from .edof import add_compare_edof
 from .estimators import add_estimators, add_wdev
 from .gui import add_gui
+from .mask import add_mask
 from .plot import add_plot
 from .preprocess import add_stats
+from .psd import add_psd
+from .spur import add_spur
 from .validate import add_validate
 
 __all__ = ["main", "build_parser"]
@@ -228,67 +228,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_gui(sub)
 
-    p_spur = sub.add_parser(
-        "spur", help="discrete tones: find them, measure them, optionally "
-                     "remove them and say so"
-    )
-    _add_input_args(p_spur)
-    p_spur.add_argument("--nperseg", type=int)
-    p_spur.add_argument("--threshold-db", type=float, default=10.0,
-                        help="how far above the local floor a bin must "
-                             "stand (default 10)")
-    p_spur.add_argument("--max-spurs", type=int, default=16)
-    p_spur.add_argument("--floor-bins", type=int, default=33,
-                        help="width of the running-median floor, in bins; "
-                             "also sets the band that can be searched")
-    p_spur.add_argument("--notch-out", metavar="FILE",
-                        help="write the record with the tones subtracted; "
-                             "every removal is recorded in its provenance")
-    p_spur.add_argument("--json", action="store_true")
-    p_spur.set_defaults(func=_cmd_spur)
+    add_spur(sub)
 
-    p_mask = sub.add_parser(
-        "mask", help="judge a record against a limit mask, with the margin "
-                     "at the worst point"
-    )
-    _add_input_args(p_mask, required_path=False)
-    p_mask.add_argument("--mask", help="mask name; --list-masks to see them")
-    p_mask.add_argument("--list-masks", action="store_true",
-                        help="print the catalogue and exit")
-    p_mask.add_argument("--taus", default="octave", choices=MODES)
-    p_mask.add_argument("--max-af", type=int)
-    p_mask.add_argument("--confidence", type=float, default=ONE_SIGMA)
-    p_mask.add_argument("--edof-method", default="auto", choices=EDOF_METHODS)
-    p_mask.add_argument("--alpha", type=int, help="assumed power law")
-    p_mask.add_argument("--no-confidence", action="store_true",
-                        help="judge the point estimate; for a variance this "
-                             "is simple acceptance and is not the default")
-    p_mask.add_argument("--json", action="store_true")
-    p_mask.set_defaults(func=_cmd_mask)
+    add_mask(sub)
 
-    p_psd = sub.add_parser(
-        "psd", help="power spectral density, and L(f) where it is meaningful"
-    )
-    _add_input_args(p_psd)
-    p_psd.add_argument("--nperseg", type=int,
-                       help="segment length (default: ~8 segments of the "
-                            "longest gap-free run, rounded down to a power of 2)")
-    p_psd.add_argument("--overlap", type=float, default=0.5)
-    p_psd.add_argument("--window", default="hann", choices=WINDOWS,
-                       dest="window_name")
-    p_psd.add_argument("--detrend", choices=DETRENDS,
-                       help="default: linear for phase, mean for frequency")
-    p_psd.add_argument("--spectrum", default=None, choices=PSD_KINDS,
-                       help="convert to this spectrum (default: the one the "
-                            "input yields natively -- S_x from phase, S_y "
-                            "from frequency)")
-    p_psd.add_argument("--nu0", type=float,
-                       help="carrier frequency in Hz; required for S_phi "
-                            "and for L(f), and never assumed")
-    p_psd.add_argument("--script-l", action="store_true",
-                       help="report L(f) in dBc/Hz instead of a density")
-    p_psd.add_argument("--json", action="store_true")
-    p_psd.set_defaults(func=_cmd_psd)
+    add_psd(sub)
 
     p_dav = sub.add_parser(
         "davar", help="dynamic stability: sigma(tau) as a function of when you looked"
@@ -495,193 +439,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cmd_mask(args) -> int:
-    """Does this unit meet spec -- the question a calibration report answers.
-
-    The mask names the statistic it limits, so the estimator is chosen from
-    the mask rather than from a flag: a limit on TDEV says nothing about
-    MTIE, and letting the two be selected independently would let them be
-    mismatched.
-    """
-    from ..mask import CATALOG, available, evaluate
-    from ..registry import get
-
-    if args.list_masks:
-        for name in available():
-            m = CATALOG[name]
-            print(f"  {name:<24} {m.quantity:<6} "
-                  f"tau {m.tau_min:g}..{m.tau_max:g} s   {m.source}")
-        return 0
-    if not args.mask:
-        raise ValueError("give --mask NAME, or --list-masks to see them")
-    if not args.path:
-        raise ValueError("give a data file to judge against the mask")
-    if args.mask not in CATALOG:
-        raise KeyError(f"no mask {args.mask!r}; available: {available()}")
-
-    mask = CATALOG[args.mask]
-    series = _load(args)
-    estimator = get("estimator", mask.quantity)
-    want_ci = not args.no_confidence and mask.quantity not in NO_INTERVAL
-    result = estimator(series, taus=args.taus, max_af=args.max_af,
-                       **({"keep_coeffs": True} if want_ci else {}))
-    ci = _confidence_for(args, result, series) if want_ci else None
-    verdict = evaluate(result, mask, ci, series)
-
-    if args.json:
-        from dataclasses import asdict
-
-        print(json.dumps(
-            {"mask": verdict.mask, "quantity": verdict.quantity,
-             "verdict": verdict.verdict,
-             "source": mask.source, "notes": list(mask.notes),
-             "checks": [asdict(c) for c in verdict.checks],
-             "worst": asdict(verdict.worst) if verdict.worst else None,
-             "provenance": to_dict(verdict.provenance)},
-            indent=2, default=str))
-        return 0
-
-    print(f"# {mask.name} against {args.path}")
-    print(f"# {mask.source}")
-    for note in mask.notes:
-        print(f"# note: {note}")
-    print(f"{'Tau (s)':>12}  {mask.quantity.upper():>13}  {'Limit':>13}  "
-          f"{'Margin':>8}  {'Verdict':<14}")
-    for c in verdict.checks:
-        limit = "--" if c.limit is None else f"{c.limit:.4e}"
-        margin = "--" if c.margin is None else f"{c.margin:>7.2f}x"
-        print(f"{c.tau_s:>12.4g}  {c.measured:>13.4e}  {limit:>13}  "
-              f"{margin:>8}  {c.verdict:<14}"
-              + (f"  # {c.reason}" if c.reason else ""))
-    print(f"\nVERDICT: {verdict.verdict.upper()}")
-    if verdict.worst is not None:
-        w = verdict.worst
-        print(f"worst margin {w.margin:.2f}x at tau = {w.tau_s:g} s "
-              f"({w.measured:.4e} against {w.limit:.4e})")
-    else:
-        print("no tau could be compared with this mask")
-    return 0 if verdict.verdict in ("pass", "not_evaluated") else 1
 
 
-def _cmd_spur(args) -> int:
-    """Tones, measured against the record rather than read off the spectrum.
-
-    The spectrum says where to look; the amplitude and frequency come from
-    a least-squares fit to the samples, which is exact for a tone that fell
-    between bins and needs no flat-top window to be so.
-    """
-    from ..stats.psd import welch
-    from ..stats.spur import detect, notch
-
-    series = _load(args)
-    spec = welch(series, nperseg=args.nperseg)
-    table = detect(spec, series, threshold_db=args.threshold_db,
-                   max_spurs=args.max_spurs, floor_bins=args.floor_bins)
-
-    if args.json:
-        from dataclasses import asdict
-
-        print(json.dumps(
-            {"spurs": [asdict(s) for s in table.spurs],
-             "threshold_db": table.threshold_db,
-             "expected_false_alarms": table.expected_false_alarms,
-             "searched_hz": list(table.searched_hz),
-             "n_segments": spec.n_segments,
-             "provenance": to_dict(table.provenance)},
-            indent=2, default=str))
-    else:
-        unit = "s" if args.kind == "phase" else ""
-        print(f"# tones in {args.path}, {args.threshold_db:g} dB above the "
-              f"local floor")
-        print(f"# searched {table.searched_hz[0]:.5g} .. "
-              f"{table.searched_hz[1]:.5g} Hz over {spec.n_segments} segments; "
-              f"{table.expected_false_alarms:.2g} expected by chance")
-        if not table.spurs:
-            print("# none found")
-        else:
-            print(f"{'f (Hz)':>16}  {'amplitude':>13}  {'rms':>13}  "
-                  f"{'excess (dB)':>11}")
-            for sp in table.spurs:
-                print(f"{sp.f_hz:>16.9g}  {sp.amplitude:>13.4e}  "
-                      f"{sp.rms:>13.4e}  {sp.excess_db:>11.1f}  {unit}")
-
-    if args.notch_out:
-        from ..io import save_frequency, save_phase
-
-        if not table.spurs:
-            raise ValueError("no tones were found, so there is nothing to "
-                             "notch and no file was written")
-        cleaned = notch(series, table)
-        save = save_phase if args.kind == "phase" else save_frequency
-        written = save(cleaned, args.notch_out)
-        print(f"wrote {written.path} -- {len(table)} tones subtracted. "
-              f"This record no longer describes the device as measured; the "
-              f"removals are in its provenance.")
-    return 0
 
 
-def _cmd_psd(args) -> int:
-    """The spectrum, and L(f) only where L = S_phi/2 actually holds.
-
-    The frequency-domain view of the same noise sigma-tau describes. It is
-    not a second opinion: the two are related by a published integral, and
-    `theory/psd.md` gives the identity that ties this module's output to
-    `powerlaw.py`'s coefficients.
-    """
-    from ..stats.psd import convert, script_l, welch
-
-    series = _load(args)
-    spec = welch(series, nperseg=args.nperseg, overlap=args.overlap,
-                 window_name=args.window_name, detrend=args.detrend,
-                 nu0_hz=args.nu0)
-    if args.spectrum:
-        spec = convert(spec, args.spectrum, args.nu0)
-
-    if args.script_l:
-        f, dbc, valid = script_l(spec, args.nu0)
-        if args.json:
-            print(json.dumps(
-                {"f_hz": f.tolist(), "script_l_dbc": _nan_to_none(dbc),
-                 "small_angle_valid": valid.tolist(),
-                 "nu0_hz": args.nu0, "enbw_hz": spec.enbw_hz,
-                 "n_segments": spec.n_segments,
-                 "provenance": to_dict(spec.provenance)},
-                indent=2, default=str))
-            return 0
-        print(f"# L(f) at nu0 = {args.nu0:g} Hz, from {spec.n_segments} "
-              f"segments of {spec.nperseg}")
-        if not valid.all():
-            print(f"# {int((~valid).sum())} bins withheld: the phase "
-                  "excursion above them exceeds the small-angle limit, "
-                  "where L is not S_phi/2")
-        print(f"{'f (Hz)':>14}  {'L (dBc/Hz)':>12}")
-        for fi, di in zip(f, dbc):
-            if fi > 0.0:
-                print(f"{fi:>14.6e}  " +
-                      (f"{di:>12.2f}" if np.isfinite(di) else f"{'withheld':>12}"))
-        return 0
-
-    if args.json:
-        print(json.dumps(
-            {"kind": spec.kind, "units": spec.units, "f_hz": spec.f.tolist(),
-             "psd": spec.psd.tolist(), "rate_hz": spec.rate_hz,
-             "nperseg": spec.nperseg, "n_segments": spec.n_segments,
-             "window": spec.window, "enbw_hz": spec.enbw_hz,
-             "detrend": spec.detrend, "nu0_hz": spec.nu0_hz,
-             "provenance": to_dict(spec.provenance)},
-            indent=2, default=str))
-        return 0
-
-    print(f"# {spec.kind} ({spec.units}) for {args.path}")
-    print(f"# {spec.n_segments} segments of {spec.nperseg}, {spec.window} "
-          f"window, detrend '{spec.detrend}'")
-    print(f"# bin spacing {spec.df_hz:.6g} Hz, resolution (ENBW) "
-          f"{spec.enbw_hz:.6g} Hz")
-    print(f"{'f (Hz)':>14}  {spec.kind:>14}")
-    for fi, pi in zip(spec.f, spec.psd):
-        if fi > 0.0:
-            print(f"{fi:>14.6e}  {pi:>14.6e}")
-    return 0
 
 
 def _cmd_davar(args) -> int:
