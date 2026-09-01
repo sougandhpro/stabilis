@@ -23,7 +23,6 @@ from ..stats import ONE_SIGMA, confidence
 from ..stats.core import GAP_POLICIES
 from ..stats.edof import EDOF_METHODS
 from ..stats.greenhall import GREENHALL_RUN_POLICIES
-from ..gui import DEFAULT_PORT as GUI_DEFAULT_PORT
 from ..export import TABLE_FORMATS
 from ..io.write import FORMATS, TIME_COLUMNS
 from ..stats.powerlaw import WEIGHT_METHODS
@@ -34,6 +33,7 @@ from ..tau import MODES
 from .common import (NO_INTERVAL, _add_input_args, _confidence_for,
                      _load, _nan_to_none, _summary)
 from .docs import add_docs
+from .gui import add_gui
 from .preprocess import add_stats
 from .validate import add_validate
 
@@ -377,15 +377,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rep.add_argument("--json", action="store_true", help="emit JSON instead")
     p_rep.set_defaults(func=_cmd_report)
 
-    p_gui = sub.add_parser(
-        "gui", help="a small local page in your browser, instead of flags")
-    p_gui.add_argument("--port", type=int, default=GUI_DEFAULT_PORT)
-    p_gui.add_argument(
-        "--root", help="confine the file browser to this directory "
-                       "(default: the current one)")
-    p_gui.add_argument("--no-browser", action="store_true",
-                       help="just print the URL")
-    p_gui.set_defaults(func=_cmd_gui)
+    add_gui(sub)
 
     p_spur = sub.add_parser(
         "spur", help="discrete tones: find them, measure them, optionally "
@@ -1719,12 +1711,6 @@ def _cmd_plot(args) -> int:
     return 0
 
 
-def _cmd_gui(args) -> int:
-    """Serve the local page. Blocks until interrupted."""
-    from ..gui import serve
-
-    serve(port=args.port, root=args.root, open_browser=not args.no_browser)
-    return 0
 
 
 def _cmd_bench_check(args) -> int:

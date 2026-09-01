@@ -815,6 +815,10 @@ def test_the_bench_stage_needs_no_matplotlib(server):
         assert not module.startswith("matplotlib"), module
 
 
+# The two command-line modules that sit on the boundary with the page.
+_CLI_GUI_EDGE = ("stabilis.cli", "stabilis.cli.gui")
+
+
 def test_nothing_in_the_library_imports_the_page(server):
     """`gui/` is a client of `stabilis`, and the arrow points one way.
 
@@ -823,10 +827,21 @@ def test_nothing_in_the_library_imports_the_page(server):
     has stopped being something that could be lifted out and shipped
     separately.
 
-    `cli.py` is the one exemption and has to be. Dispatching `stabilis gui`
-    is its whole job, and it does so with the import *inside* the command
-    function, so nothing is loaded until someone asks for the page. That is
-    the difference between an entry point and a dependency.
+    Two names on the command line are exempt, and both are small enough to
+    read. `stabilis.cli.gui` dispatches `stabilis gui`, which is its whole
+    job; `stabilis.cli` itself writes `from .gui import add_gui` to assemble
+    the parser, and an `ast.ImportFrom` for a relative import records
+    `module` as the bare token `gui`, which the scan below cannot tell from
+    the package.
+
+    Only `serve` is lazy. `DEFAULT_PORT` is imported at module scope and
+    always was, because argparse captures a default when the parser is
+    built -- so `import stabilis.cli` loads the whole page package for one
+    integer. That is a real wart, and naming it here is better than the
+    older wording, which claimed the import was inside the command function
+    and was not true of `cli.py` either. What the exemption buys is that
+    every *other* module in the package is now proved not to reach the page;
+    the single blanket exemption for a 2054-line file proved nothing.
     """
     import ast
     import importlib
@@ -837,7 +852,7 @@ def test_nothing_in_the_library_imports_the_page(server):
 
     checked = 0
     for info in pkgutil.walk_packages(stabilis.__path__, "stabilis."):
-        if info.name.startswith("stabilis.gui") or info.name == "stabilis.cli":
+        if info.name.startswith("stabilis.gui") or info.name in _CLI_GUI_EDGE:
             continue
         module = importlib.import_module(info.name)
         try:
