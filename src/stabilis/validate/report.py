@@ -54,9 +54,10 @@ from ..stats.bias import deviation_bias_factor
 from ..stats.core import StabilityResult
 from ..stats.edof import eta1
 from ..stats.greenhall import greenhall_edof
-from ..synth import (_kasdin_walter_impulse, _unit_h_alpha, power_law_freq,
-                     power_law_phase)
+from ..stats.wavelet import modwt, wavelet_variance
+from ..synth import power_law_freq, power_law_phase
 from ..types import FreqSeries, PhaseSeries
+from .expected import expected_avar, expected_wvar, wavelet_kernel
 from .certified import (
     certified_deviation,
     exact_avar,
@@ -278,8 +279,58 @@ def _identities() -> list[Check]:
         abs(c4 / (np.sqrt(np.pi) / 2) - 1.0) < 1e-15,
     ))
     out.append(_synth_amplitude_identity())
+    out.append(_wavelet_level_identity())
     out.extend(_streaming_identities())
     return out
+
+
+def _wavelet_level_identity() -> Check:
+    """The absolute level of the wavelet variance, which nothing else pins.
+
+    Every non-Haar wavelet check in the suite used to be *scale-free*: the
+    filter algebra certifies the filters, drift annihilation is a ratio at
+    one filter, the EDOF score is `2 mean**2 / var`. Only Haar was anchored,
+    by `2 nu**2 = oavar`. So a constant multiplicative error in the D4/D6/D8
+    variance, or a wrong `tau_j <-> level` assignment, would have passed
+    everything. This is the check that closes it, and it is exact.
+
+    Two claims, scored together because either alone is insufficient:
+
+    * `modwt` applied to a unit impulse returns the level-`j` equivalent
+      filter, and that must equal the textbook upsampling cascade built in
+      `validate/expected.py`. This pins the level loop, the `1/sqrt(2)`
+      normalization and the `2**(j-1)` stride -- the shape.
+    * that filter has squared norm `2**-j` exactly, the orthonormality of
+      the transform. This pins the level, since for white FM
+      `E[nu_j**2] = var(y) * ||a_j||**2`, and `tau_j = 2**(j-1) tau0` then
+      makes `2 nu_j**2` the Allan variance.
+    """
+    worst_shape, worst_norm = 0.0, 0.0
+    for name in ("haar", "d4", "d6", "d8"):
+        for level in range(1, 7):
+            a = wavelet_kernel(name, level)
+            x = np.zeros(1 << 12)
+            x[0] = 1.0
+            got = modwt(x, name, levels=level)[level - 1]
+            worst_shape = max(worst_shape, float(np.abs(got[:a.size] - a).max()),
+                              float(np.abs(got[a.size:]).max()))
+            worst_norm = max(worst_norm,
+                             abs(float(a @ a) * (1 << level) - 1.0))
+    ok = worst_shape < 1e-15 and worst_norm < 1e-14
+    return Check(
+        "identity", "MODWT equivalent filters, shape and level",
+        "The transform's response at each level against the equivalent "
+        "filter built independently by the upsampling cascade, and that "
+        "filter's squared norm against 2**-j. Over haar, d4, d6, d8 and "
+        "levels 1..6. Without this the non-Haar wavelet variances have no "
+        "check on their absolute level at all -- see VALIDATION-DEBT "
+        "item 11 for what that did and did not expose.",
+        "1e-15 absolute on the taps and 1e-14 relative on the norm. Both "
+        "are exact identities evaluated in floating point, so the only "
+        "budget is accumulation over the cascade.",
+        f"taps {worst_shape:.1e}, norm {worst_norm:.1e}",
+        ok,
+    )
 
 
 def _streaming_identities() -> list[Check]:
@@ -393,7 +444,7 @@ def _synth_amplitude_identity() -> Check:
          * (1.0 + 1.0 / (2.0 * m**2))),
     ):
         for m in (1, 2, 4, 16):
-            got = _exact_generator_avar(alpha, m) / _unit_h_alpha(alpha, tau0)
+            got = expected_avar(alpha, m, tau0)
             worst = max(worst, abs(got / want(m) - 1.0))
     return Check(
         "identity", "synthesizer amplitude against its exact closed forms",
@@ -408,22 +459,6 @@ def _synth_amplitude_identity() -> Check:
         f"worst deviation {worst:.2e} over three power laws and m = 1..16",
         worst < 1e-10,
     )
-
-
-def _exact_generator_avar(alpha: float, m: int, n: int = 1 << 16) -> float:
-    """`E[avar(m*tau0)]` at unit driving variance, from the impulse response.
-
-        ybar2 - ybar1 = sum_j g_j w_j,   g = correlate(a, h),
-        a = [-1/m]*m + [+1/m]*m,         E[avar] = (g @ g)/2
-
-    The trailing `len(a)-1` entries are dropped: their sums run off the end
-    of the truncated `h`, where the true process still has support and `a`
-    summing to zero cancels them. Keeping them doubles the alpha = -2 answer.
-    """
-    h = _kasdin_walter_impulse(n, beta=-alpha)
-    a = np.concatenate((np.full(m, -1.0 / m), np.full(m, 1.0 / m)))
-    g = np.convolve(h, a[::-1])[: -(a.size - 1)]
-    return float(g @ g) / 2.0
 
 
 def _certified() -> list[Check]:
@@ -595,6 +630,7 @@ def _coverage(trials: int) -> list[Check]:
     ))
     out += _greenhall_against_truth(ensembles, trials, truth_se)
     out.append(_h_alpha_round_trip(ensembles, trials))
+    out.append(_wavelet_level_against_exact_expectation(trials))
     out.append(_decomposition_round_trip(trials))
     out.append(_bench_hat_round_trip())
     out.append(_cross_sees_under_the_instrument(trials))
@@ -1007,7 +1043,7 @@ def _h_alpha_round_trip(ensembles, trials: int) -> Check:
         for i, af in enumerate(first.af.tolist()):
             if af > 512 // 16:
                 continue
-            want = _exact_generator_avar(float(alpha), af) / _unit_h_alpha(alpha, tau0)
+            want = expected_avar(float(alpha), af, tau0)
             worst = max(worst, abs(mean_var[i] / want - 1.0))
     # The ensemble mean of a variance has relative standard error
     # sqrt(2/(trials*eta)); eta >= 1, so sqrt(2/trials) is the floor and the
@@ -1026,6 +1062,58 @@ def _h_alpha_round_trip(ensembles, trials: int) -> Check:
         f"({se:.0%} at {trials} trials), for m up to N/16.",
         f"worst deviation {worst:.1%} over three power laws",
         worst < bound,
+    )
+
+
+def _wavelet_level_against_exact_expectation(trials: int) -> Check:
+    """End to end: does the estimator return the level the theory says?
+
+    `_wavelet_level_identity` pins the *filters* exactly. What it cannot
+    reach is the aggregation on top of them -- the boundary drop, the mean
+    of squares, the `tau_j = 2**(j-1) tau0` assignment -- which for Haar is
+    tied down by `2 nu**2 = oavar` and for the longer filters by nothing.
+    So run the estimator and compare its ensemble mean against
+    `E[nu_j**2] = ||a_j * h||**2`, which is exact and needs no simulation of
+    its own.
+
+    Scored in units of the ensemble's *own* standard error rather than at a
+    fixed percentage. The coarsest levels retain a handful of coefficients,
+    so their spread is genuinely large, and a fixed band would either pass
+    them vacuously or fail them spuriously.
+    """
+    tau0 = 1.0
+    worst, where = 0.0, ""
+    for alpha in (2, 0, -2):
+        rng = np.random.default_rng(SEEDS["coverage"] + alpha)
+        series = [power_law_freq(512, alpha, rate_hz=1.0, rng=rng)
+                  for _ in range(trials)]
+        for name in ("haar", "d4", "d6", "d8"):
+            runs = [wavelet_variance(s, name=name, keep_coeffs=False)
+                    for s in series]
+            v = np.array([r.var for r in runs])
+            want = np.array([expected_wvar(name, level, float(alpha), tau0)
+                             for level in range(1, v.shape[1] + 1)])
+            # Relative standard error of the ensemble mean, measured rather
+            # than assumed: eta is not known here and is the quantity the
+            # wavelet EDOF check exists to estimate.
+            se = v.std(axis=0, ddof=1) / (np.sqrt(trials) * v.mean(axis=0))
+            z = np.abs(v.mean(axis=0) / want - 1.0) / se
+            if z.max() > worst:
+                worst, where = float(z.max()), f"{name}, alpha={alpha}"
+    return Check(
+        "coverage", "wavelet variance against its exact expected value",
+        "The ensemble mean of nu**2(tau_j) against ||a_j * h||**2, the "
+        "expectation computed exactly from the generator's impulse "
+        "response -- no Monte Carlo on the truth side. Over haar, d4, d6 "
+        "and d8, at white PM, white FM and random-walk FM, N=512. This is "
+        "the only absolute check the non-Haar wavelet variances have: "
+        "every other one in the suite is scale-free.",
+        "within 4 standard errors of the ensemble mean, measured from the "
+        "ensemble itself. 96 level-and-filter comparisons are scored, so a "
+        "3-sigma band would be expected to throw a false failure roughly "
+        "one run in four.",
+        f"worst {worst:.1f} sigma ({where})",
+        worst < 4.0,
     )
 
 

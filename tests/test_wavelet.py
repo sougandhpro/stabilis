@@ -22,6 +22,7 @@ from stabilis.stats.wavelet import (
 )
 from stabilis.synth import power_law_freq
 from stabilis.types import FreqSeries
+from stabilis.validate.expected import expected_wvar, wavelet_kernel
 
 
 @pytest.mark.parametrize("name", sorted(FILTERS))
@@ -299,3 +300,106 @@ def test_a_record_too_short_for_the_filter_is_refused():
     fs = FreqSeries(np.arange(6, dtype=np.float64), rate_hz=1.0)
     with pytest.raises(ValueError, match="no scale survives|at least 2"):
         wavelet_variance(fs, "d8")
+
+
+# ---------------------------------------------------------------------------
+# The absolute level. VALIDATION-DEBT item 11: everything above this line is
+# scale-free once Haar is set aside, so a constant multiplicative error in
+# the D4/D6/D8 variance, or a wrong `tau_j <-> level` assignment, used to
+# pass the whole file. These four close that.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", sorted(FILTERS))
+@pytest.mark.parametrize("level", [1, 2, 3, 4, 5, 6])
+def test_the_transform_reproduces_the_equivalent_filter_exactly(name, level):
+    """`modwt` of a unit impulse *is* the level-`j` equivalent filter.
+
+    Built here by the textbook upsampling cascade, in `validate/expected.py`,
+    which shares no line with the transform's own level loop. Agreement to
+    machine precision pins the three things that loop could get wrong: the
+    `1/sqrt(2)` normalization per level, the `2**(j-1)` stride, and which
+    level the wavelet filter enters at rather than the scaling filter.
+
+    The tail matters as much as the head. `L_j = (2**j - 1)(L - 1) + 1`, so
+    a filter that ran one level too deep would still match on its first
+    taps and only differ past where the shorter one stops.
+    """
+    a = wavelet_kernel(name, level)
+    assert a.size == ((1 << level) - 1) * (2 * FILTERS[name] - 1) + 1
+
+    x = np.zeros(1 << 12)
+    x[0] = 1.0
+    got = modwt(x, name, levels=level)[level - 1]
+    assert got[:a.size] == pytest.approx(a, rel=0, abs=1e-15)
+    assert np.all(got[a.size:] == 0.0)
+
+
+@pytest.mark.parametrize("name", sorted(FILTERS))
+@pytest.mark.parametrize("level", [1, 2, 3, 4, 5, 6])
+def test_the_equivalent_filter_has_squared_norm_two_to_the_minus_level(
+        name, level):
+    """`||a_j||**2 = 2**-j`, and *that* is what fixes the level.
+
+    It is the orthonormality of the transform read as an energy statement:
+    summed over levels, `sum_j 2**-j + 2**-J = 1`, so the MODWT preserves
+    the variance of the record. For white FM it is the whole answer --
+    `E[nu_j**2] = var(y) * ||a_j||**2` -- and combined with
+    `tau_j = 2**(j-1) tau0` it makes `2 nu_j**2` the Allan variance at that
+    tau, for *every* filter and not only Haar.
+
+    It holds for any orthonormal wavelet, which is the point: it is
+    independent of whether the Daubechies coefficients are the right ones,
+    a question the filter algebra above answers separately.
+    """
+    a = wavelet_kernel(name, level)
+    assert float(a @ a) == pytest.approx(1.0 / (1 << level), rel=1e-14)
+
+
+@pytest.mark.parametrize("name", sorted(FILTERS))
+def test_white_fm_gives_the_allan_variance_at_every_filter(name):
+    """`2 nu_j**2 = h_0/(2 tau_j)` exactly, D8 as much as Haar.
+
+    White FM is the one power law where the discrete generator is the ideal
+    process, so the expectation is closed-form and this is an identity
+    rather than a measurement. It is the cheapest statement of the anchor:
+    a filter whose variance were off by a constant, or reported at the
+    wrong tau, would miss a *published* number here.
+    """
+    tau0, h0 = 0.25, 3.1e-24
+    for level in range(1, 7):
+        tau = (1 << (level - 1)) * tau0
+        got = 2.0 * expected_wvar(name, level, 0.0, tau0, h0)
+        assert got == pytest.approx(h0 / (2.0 * tau), rel=1e-12)
+
+
+@pytest.mark.parametrize("alpha", [2, 0, -2])
+@pytest.mark.parametrize("name", ["d4", "d6", "d8"])
+def test_the_estimator_returns_the_exactly_known_level(alpha, name):
+    """End to end, at the three power laws, for the filters Haar cannot cover.
+
+    The identities above pin the filters; this pins the aggregation stacked
+    on them -- the boundary drop, the mean of squares, the tau assignment --
+    against `E[nu_j**2] = ||a_j * h||**2`, which is exact and simulates
+    nothing. Only the estimator side is a Monte-Carlo average, so the band
+    is the ensemble's own standard error and no truth uncertainty enters.
+
+    Scored over the levels retaining at least 32 coefficients. The coarsest
+    two hold a handful, where the mean of an eta-of-order-one variance is
+    not a measurement of anything at 200 trials; the report's own row scores
+    every level, at a band widened by that spread rather than by dropping it.
+    """
+    trials, tau0 = 200, 1.0
+    rng = np.random.default_rng(400 + alpha)
+    runs = [wavelet_variance(power_law_freq(1024, alpha, rate_hz=1.0, rng=rng),
+                             name=name, keep_coeffs=False)
+            for _ in range(trials)]
+    v = np.array([r.var for r in runs])
+    keep = runs[0].n_terms >= 32
+    assert keep.sum() >= 4, "expected several usable levels at N=1024"
+
+    want = np.array([expected_wvar(name, level, float(alpha), tau0)
+                     for level in range(1, v.shape[1] + 1)])
+    se = v.std(axis=0, ddof=1) / (np.sqrt(trials) * v.mean(axis=0))
+    z = np.abs(v.mean(axis=0) / want - 1.0)[keep] / se[keep]
+    assert z.max() < 4.0, f"worst {z.max():.1f} sigma at levels {keep.nonzero()}"

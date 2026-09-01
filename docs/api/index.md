@@ -35,6 +35,7 @@ through a submodule path may move.
 | [`add_step`](core.md#add_step) | function | `stabilis.provenance` | Return a copy of `prov` with one more step appended. |
 | [`adev`](stats.md#adev) **root** | function | `stabilis.stats.classical` | Non-overlapping Allan deviation. See theory/avar.md. |
 | [`Alignment`](multi.md#alignment) | class | `stabilis.multi.align` | Records cropped to one window, and what that cost. |
+| [`allan_kernel`](validate.md#allan_kernel) | function | `stabilis.validate.expected` | The Allan kernel at averaging factor `m`, in convolution orientation. |
 | [`ALPHA_NAMES`](core.md#alpha_names) | constant | `stabilis.synth` | IEEE 1139 power-law noise types, keyed by the exponent of S_y(f). |
 | [`ALPHA_NAMES`](stats.md#alpha_names) | constant | `stabilis.stats.noiseid` | Power-law index alpha of S_y(f) ~ f^alpha, and the usual names. |
 | [`ALPHAS`](core.md#alphas) | constant | `stabilis.powerlaw_coeffs` | The five IEEE 1139 power laws, most-blue first, which is the column order of the decomposition's design matrix. |
@@ -134,8 +135,11 @@ through a submodule path may move.
 | [`exact_phase_from_freq`](validate.md#exact_phase_from_freq) | function | `stabilis.validate.certified` | Exact phase from fractional frequency: x[0] = 0, x[k] = sum y[i]*tau0. |
 | [`exact_tvar`](validate.md#exact_tvar) | function | `stabilis.validate.certified` | Exact time variance: tvar = (m*tau0)**2 / 3 * mvar. |
 | [`exclude_between`](gui.md#exclude_between) | function | `stabilis.gui.prepare` | Mark everything outside `spans` as a gap, and record that it happened. |
+| [`expected_avar`](validate.md#expected_avar) | function | `stabilis.validate.expected` | `E[avar(m*tau0)]` for a record generated at this `tau0` and `h_alpha`. |
 | [`EXPECTED_NBS14_1000POINT`](core.md#expected_nbs14_1000point) | constant | `stabilis.reference` |  |
 | [`EXPECTED_NBS14_9POINT`](core.md#expected_nbs14_9point) | constant | `stabilis.reference` |  |
+| [`expected_variance`](validate.md#expected_variance) | function | `stabilis.validate.expected` | `E[sigma^2]` of `scale * mean(c**2)` at unit driving variance. |
+| [`expected_wvar`](validate.md#expected_wvar) | function | `stabilis.validate.expected` | `E[nu^2(tau_j)]`, the wavelet variance at `tau_j = 2^{j-1} tau0`. |
 | [`explain_failure`](gui.md#explain_failure) | function | `stabilis.gui.benchdata` | Add what the page knows to what the solver said. |
 | [`ExpressionError`](gui.md#expressionerror) | class | `stabilis.gui.expr` | The expression is not in the grammar, or names something absent. |
 | [`feed`](stream.md#feed) | function | `stabilis.stream.collect` | Push a stream through the grid and into an online accumulator. |
@@ -175,6 +179,7 @@ through a submodule path may move.
 | [`identify`](stats.md#identify) **root** | function | `stabilis.stats.noiseid` | Identify the noise at averaging factor `m`, cross-checked if possible. |
 | [`identify_curve`](stats.md#identify_curve) **root** | function | `stabilis.stats.noiseid` | Identify the noise at every averaging factor on a tau grid. |
 | [`implied_eta`](multi.md#implied_eta) | function | `stabilis.multi.cross` | `cross_sem` inverted: the degrees of freedom this error bar implies. |
+| [`IMPULSE_TERMS`](validate.md#impulse_terms) | constant | `stabilis.validate.expected` | Terms of `h` retained. The recursion decays like k**(beta/2 - 1), so the steepest case this library generates (beta = 2, random-walk FM) does not decay at all and is the one that sets this: 2**16 terms put the residual of the checks below at 1e-11 relative, an order under the tightest tolerance any caller asserts at. |
 | [`infer_rate`](io.md#infer_rate) | function | `stabilis.io.timebase` | `(rate_hz, jitter)` from timestamps, using the median interval. |
 | [`INTEROP_RTOL`](core.md#interop_rtol) | constant | `stabilis.reference` | The published tables carry seven significant figures, so this is the tightest tolerance the data supports. Asserting harder would be asserting against digits the source never claimed. |
 | [`isserlis_var`](stats.md#isserlis_var) | function | `stabilis.stats.isserlis` | Variance of the mean of the pair-averaged products, exactly. |
@@ -402,6 +407,7 @@ through a submodule path may move.
 | [`verify`](export.md#verify) | function | `stabilis.export.bundle` | Every file whose bytes no longer match the manifest. |
 | [`warn`](core.md#warn) | function | `stabilis.log` | Record a step that the user needs to see. Same record, louder. |
 | [`wavelet_filters`](stats.md#wavelet_filters) | function | `stabilis.stats.wavelet` | `(g, h)` -- scaling and wavelet filters -- for a named family. |
+| [`wavelet_kernel`](validate.md#wavelet_kernel) | function | `stabilis.validate.expected` | The level-`j` MODWT equivalent wavelet filter, by the cascade. |
 | [`wavelet_variance`](stats.md#wavelet_variance) | function | `stabilis.stats.wavelet` | Wavelet variance by scale, from a `FreqSeries` or `PhaseSeries`. |
 | [`wdev`](stats.md#wdev) **root** | function | `stabilis.stats.wavelet` | Wavelet deviation on the **Allan scale**: `sqrt(2 * nu^2)`. |
 | [`WEIGHT_METHODS`](stats.md#weight_methods) | constant | `stabilis.stats.powerlaw` |  |

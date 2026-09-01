@@ -353,48 +353,41 @@ threshold. A simultaneous band would need the window-to-window correlation
 this library does compute for τ (`stats/taucov.py`) applied along the other
 axis — real work, and not yet done.
 
-## 11. The non-Haar wavelet variances have no anchor on their level
+## 11. TOTVAR and the Thêo family have no exact expected value
 
-**Status: open, cheap to close, and the machinery already exists.**
+**Status: open, low severity, and bounded by what is already measured.**
 
-`theory/wavelet.md` says the family is validated, and for `haar` that is
-exact: `2·ν²_Haar(τ) = oavar(τ)` to 1e-14 over eleven octaves, against a
-path already certified to fourteen digits. For `d4`, `d6` and `d8` there is
-no such anchor, and reading what `tests/test_wavelet.py` actually asserts
-shows why. The filter algebra certifies the *filters*, not the variance.
-Drift annihilation is a **ratio** of dirty to clean at the same filter, so
-any normalization cancels. The EDOF check scores `eta1` against
-`2·mean²/var`, both scale-free, and covers `d4` and `d8` only — `d6` has no
-EDOF check at all. Shift equivariance and invariance are `d4`-only and also
-scale-free.
+Every other estimator in the library now has an `E[σ²(τ)]` that is exact
+rather than simulated. The Allan family gets one from the generator's
+impulse response (`validate/expected.py`), and the wavelet family got one
+on 2026-09-01 by the same route. TOTVAR, Thêo1, ThêoBR and ThêoH do not.
 
-**So a constant multiplicative error in the D4/D6/D8 wavelet variance, or a
-wrong `tau_j ↔ level` assignment for the longer filters, would pass the
-entire shipped suite.** The exposure is narrow — the `1/sqrt(2)`
-normalization and the level loop in `modwt` are shared with the Haar case
-that *is* anchored, and `||g|| = 1` and `sum g = sqrt(2)` are certified per
-filter — but narrow is not the same as checked, and this file exists to say
-which is which. There is also no wavelet row in `validate/report.py`, which
-`CLAUDE.md` requires of every estimator.
+What they have instead is a *ratio*. `totdev` is tied to `oadev` exactly at
+`m = 1`, where the reflection has not yet done anything, and thereafter its
+level rests on the published bias coefficients of `stats/bias.py` scored
+against Monte-Carlo measurement (`tests/test_total.py`,
+`tests/test_theoh.py`, and Thêo1's SP 1065 Table 2). Those coefficients are
+published and the agreement is real, so this is not an unchecked level — it
+is a level checked at a Monte-Carlo tolerance, against a reference that
+assumes a noise type, rather than at machine precision against a closed
+form. The distinction is the same one `theory/wavelet.md` draws, and the
+reason it is written down is that the wavelet case looked equally safe and
+was not.
 
-Stable32 cannot close it: the parity matrix marks wavelet variance as
-absent from Stable32, so no fixture can exist and none should be
-manufactured. This is exactly the case the analytic tier was built for.
+**Why the wavelet machinery does not simply extend.** `expected_variance`
+takes a *convolution* kernel: the estimator's terms must be one
+shift-invariant linear functional of the record. Both families break that.
+TOTVAR extends the record by an odd reflection about each endpoint before
+differencing, and the Thêo family averages over a lag structure built on
+the record's own length — both linear in the record, neither time-invariant.
+The general form is therefore `E[σ²] = scale·tr(A H Hᵀ Aᵀ)/n_terms` with
+`A` the estimator's matrix and `H` the impulse convolution matrix, which is
+`O(N²)` memory at the record lengths involved and needs `A` written out
+per estimator instead of read off the coefficient function. That is real
+work, and it is the reason this is an item rather than a commit.
 
-**How it discharges.** `validate/report.py::_exact_generator_avar` already
-computes `E[avar]` exactly from the Kasdin–Walter impulse response — no
-Monte Carlo, no tolerance — because `y = h ⊛ w` makes the estimator one
-fixed linear functional of the driving white noise, so `g = a ⊛ h` and
-`E[σ²] = scale·(g·g)`. It is written for the Allan kernel alone. The
-generalization needs no new mathematics per estimator: the coefficient
-function *is* the kernel, so running it on the impulse response yields `g`
-directly, and `scale` comes from the `variance = scale·mean(c²)` contract
-that every estimator already honours. That gives every Daubechies order a
-machine-precision expected value at a known `h_alpha`, and the same routine
-then widens to TOTVAR and the Thêo family, which today are validated only
-as *bias ratios* to AVAR and have no absolute `E[σ²(τ)]` anywhere in this
-repository. MTIE stays out: it is an extreme-value statistic and not a
-linear functional of the record.
+MTIE stays out permanently: an extreme value is not a linear functional of
+the record at all, so no form of this argument reaches it.
 
 ---
 
@@ -415,6 +408,19 @@ waiting on anything:
   SP 1065 integrals they descend from and against the shipped `oadev` and
   `mdev` over 300 realizations. The one row with a residual gap is item 2
   above, and it is bounded and explained rather than open;
+- **the wavelet variance, level included, for every filter.** Closed
+  2026-09-01, and it was item 11 on this list until then. `modwt`'s
+  response at each level is compared against the equivalent filter built
+  independently by the upsampling cascade in `validate/expected.py` (1e-17
+  over four families and six levels), that filter's squared norm against
+  `2^-j` exactly, and the estimator's ensemble mean against
+  `E[ν_j²] = ‖a_j ⊛ h‖²` — an expectation computed exactly from the
+  generator's impulse response, so nothing on the truth side is simulated.
+  The gap was real and was measured before it was closed: a 3% inflation
+  of the non-Haar variance left the whole of the rest of
+  `tests/test_wavelet.py` green. Two rows in the validation report, and
+  `theory/wavelet.md` carries the derivation. It does **not** widen to
+  TOTVAR or the Thêo family — see item 11;
 - **the synthesizer's amplitude** — `h_alpha` is a calibrated, settable
   parameter as of 2026-08-08. Its exact discrete `E[avar]` reproduces the
   closed forms for white FM, white PM and random-walk FM to 1e-16, and the

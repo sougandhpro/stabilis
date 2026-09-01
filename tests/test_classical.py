@@ -167,14 +167,21 @@ def test_oracle_is_independent_of_the_production_path():
 
     Its independence is the entire evidential value: a shared helper would
     quietly turn the certified comparison into a tautology.
+
+    `wavelet` is scanned too, and the arrow there runs the *other* way:
+    `validate/expected.py` imports `wavelet_filters` to build the
+    equivalent filter it then compares `modwt` against. That is fine --
+    the filters are certified by their own algebra -- but only for as long
+    as the traffic stays one-directional.
     """
     import ast
     import inspect
 
     import stabilis.stats.classical as classical
     import stabilis.stats.core as core
+    import stabilis.stats.wavelet as wavelet
 
-    for module in (classical, core):
+    for module in (classical, core, wavelet):
         tree = ast.parse(inspect.getsource(module))
         names = set()
         for node in ast.walk(tree):

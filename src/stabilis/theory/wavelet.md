@@ -145,8 +145,8 @@ not an argument for improvising an interpolation here.
 
 ## Validation status
 
-**Validated for `haar`; validated in structure but not in *level* for
-`d4`, `d6` and `d8`.** `tests/test_wavelet.py`: the filter algebra for every
+**Validated, level included, for every filter.** `tests/test_wavelet.py`:
+the filter algebra for every
 family; the Allan identity to 1e-14 over eleven octaves, from both phase and
 frequency input; shift equivariance of the coefficients as bit equality;
 shift invariance of the biased variance to 1e-14; the deliberate
@@ -156,14 +156,55 @@ interval against the overlapping Allan one; and the gap accounting.
 `tests/test_docs_and_cli.py` runs the same identity through the CLI, since
 that is where a user meets it.
 
-What that list does **not** contain is a check on the absolute level of
-any filter but `haar`. The drift ratio, the EDOF ratio and the shift
-invariances are every one of them scale-free, so a constant
-multiplicative error in the `d4`/`d6`/`d8` variance would pass all of
-them. Only `haar` is pinned, by the Allan identity. See
-`VALIDATION-DEBT.md` item 11 for what closes it: the generator's exact
-`E[sigma^2]` from its impulse response, which needs no new mathematics
-per estimator because the coefficient function is the kernel.
+### How the level is pinned
+
+Until 2026-09-01 that list contained no check on the absolute level of any
+filter but `haar`. The drift ratio, the EDOF ratio and the shift
+invariances are every one of them scale-free, so a constant multiplicative
+error in the `d4`/`d6`/`d8` variance passed all of them — measured, not
+supposed: inflating the non-Haar variance by 3% leaves the whole of the
+rest of `tests/test_wavelet.py` green.
+
+Three checks close it, and none is a Monte-Carlo estimate of the truth.
+
+1. **The equivalent filter, exactly.** `modwt` applied to a unit impulse
+   returns the level-`j` equivalent wavelet filter. `validate/expected.py`
+   builds that filter independently by the upsampling cascade,
+
+       a_j = up(h~, 2^{j-1}) * c_{j-1},   c_j = up(g~, 2^{j-1}) * c_{j-1}
+
+   with `c_0 = [1]`, and the two agree to 1e-17 over four families and six
+   levels. That pins the shape: the `1/sqrt(2)` per level, the `2^{j-1}`
+   stride, and where the wavelet filter enters rather than the scaling one.
+   Length `L_j = (2^j - 1)(L - 1) + 1` is asserted with it, so a cascade
+   run one level too deep — which agrees on its leading taps — still fails.
+
+2. **The norm, exactly.** `||a_j||² = 2^-j`, the orthonormality of the
+   transform read as an energy statement. It is what fixes the *level*
+   rather than the shape: for white FM `E[ν_j²] = var(y)·||a_j||²`, so
+   `2ν_j²` is the Allan variance at `τ_j = 2^{j-1} τ₀` for every filter,
+   not only for `haar`. The published closed form `h₀/(2τ)` is asserted
+   against it at 1e-12 for all four families.
+
+3. **The estimator, end to end.** The two above pin the filters; the
+   aggregation stacked on them — the boundary drop, the mean of squares,
+   the τ assignment — is checked against
+
+       E[ν_j²] = ‖a_j ⊛ h‖²
+
+   where `h` is the Kasdin–Walter impulse response. `y = h ⊛ w` makes each
+   coefficient one fixed linear functional of the driving white noise, so
+   the expectation is *exact* — only the estimator side is an ensemble
+   average, and the band is that ensemble's own standard error. Scored at
+   `d4`, `d6`, `d8` × white PM, white FM, random-walk FM, and in the
+   validation report over all four filters at every level.
+
+This is the case the analytic tier exists for: Stable32 has no wavelet
+variance, so no interop fixture could exist and none should be manufactured.
+The same machinery does *not* reach TOTVAR or the Thêo family — both extend
+the record by reflection, so they are linear functionals but not
+convolutions, and still have no absolute `E[σ²(τ)]` anywhere in the
+repository. MTIE is out permanently.
 
 ## Not yet
 

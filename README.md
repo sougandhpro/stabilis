@@ -103,7 +103,7 @@ Whichever route, ask the installed package what it is rather than assuming:
 
 ```bash
 python3 -c "import stabilis; print(stabilis.__version__)"
-stabilis validate                     # 38/38, and a digest over the evidence
+stabilis validate                     # 40/40, and a digest over the evidence
 ```
 
 `stabilis validate` is the honest check that a remote machine got a working
@@ -172,7 +172,7 @@ either is stale, so a signature can never drift away from its description.
 ## Status
 
 **M0–M3, M5 and M6 complete, plus the measurement report, the fitting
-layer, the export layer, and most of M8.** 1407 tests; `stabilis validate` 38/38.
+layer, the export layer, and most of M8.** 1468 tests; `stabilis validate` 40/40.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -216,7 +216,10 @@ legitimately be quoted. Since then:
 - **The MODWT wavelet family**, four filters, with confidence intervals.
   The Haar case returns the overlapping Allan variance *and* its error
   bar, which is a cross-check of two independent code paths rather than a
-  special case.
+  special case. The longer filters are anchored on their *level*, not only
+  their shape: `E[ν_j²] = ‖a_j ⊛ h‖²` is computed exactly from the
+  generator's impulse response, so the truth side of that comparison
+  simulates nothing.
 - **Model fitting under the χ² likelihood**, with the correlation *between*
   τ measured rather than assumed away. The exact likelihood turns out to be
   a sum of squares, so Levenberg–Marquardt minimizes it with no Gaussian

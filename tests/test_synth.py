@@ -17,43 +17,30 @@ import pytest
 from stabilis.stats.classical import oadev
 from stabilis.synth import (
     _kasdin_walter_impulse,
-    _unit_h_alpha,
     power_law_freq,
     power_law_noise,
     power_law_phase,
 )
+from stabilis.validate.expected import expected_avar
 
 
-def exact_avar_unit(alpha: float, m: int, n: int = 1 << 20) -> float:
-    """`E[avar(m*tau0)]` of the generator at unit driving variance, exactly.
-
-    `y = h * w` with `w` iid of unit variance, so the Allan first difference
-    of `m`-sample means is one fixed linear functional of `w`,
-
-        ybar2 - ybar1 = sum_j g_j w_j,   g = correlate(a, h),
-        a = [-1/m]*m + [+1/m]*m
-        E[avar] = (g @ g) / 2
-
-    This is an *independent path* to the same number the estimators compute:
-    impulse response and exact expectation here, time-domain differencing of
-    a realization there. Truncating `h` at `n` is the only approximation, and
-    the trailing `len(a)-1` entries -- whose sums run off the end of the
-    truncated `h`, where the true process still has support and `a` summing
-    to zero cancels them -- are dropped rather than counted. Keeping them
-    doubles the alpha = -2 answer.
-
-    The value is independent of `tau0` -- it is a property of the sample
-    sequence -- so the caller scales it by `h_alpha / _unit_h_alpha(...)`.
-    """
-    h = _kasdin_walter_impulse(n, beta=-alpha)
-    a = np.concatenate((np.full(m, -1.0 / m), np.full(m, 1.0 / m)))
-    g = np.convolve(h, a[::-1])[: -(a.size - 1)]
-    return float(g @ g) / 2.0
+# The truncation depth. `expected_variance` defaults to 2**16 terms, which
+# is ample for the report's 1e-10 claims; the closed forms below are
+# asserted at 1e-14 with m = 256, so they buy four more binary orders of
+# `h` rather than widen a tolerance to fit the default.
+EXACT_TERMS = 1 << 20
 
 
 def exact_avar(alpha: float, m: int, tau0: float, h_alpha: float) -> float:
-    """`E[avar]` for a series generated with this `tau0` and this `h_alpha`."""
-    return exact_avar_unit(alpha, m) * h_alpha / _unit_h_alpha(alpha, tau0)
+    """`E[avar]` for a series generated with this `tau0` and this `h_alpha`.
+
+    An *independent path* to the number the estimators compute: impulse
+    response and exact expectation there, time-domain differencing of a
+    realization here. It lives in `validate/expected.py` because the
+    wavelet family needs the same machinery -- see that module for why the
+    trailing entries of the convolution are dropped.
+    """
+    return expected_avar(alpha, m, tau0, h_alpha, n=EXACT_TERMS)
 
 
 def test_impulse_random_walk_is_cumulative_sum():
