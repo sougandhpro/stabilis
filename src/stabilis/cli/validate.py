@@ -6,8 +6,6 @@ qualification pipeline rather than only as something to read.
 
 from __future__ import annotations
 
-import sys
-
 __all__ = ["add_validate"]
 
 

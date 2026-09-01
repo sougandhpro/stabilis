@@ -22,7 +22,6 @@ from ..provenance import to_dict
 from ..stats import ONE_SIGMA, confidence
 from ..stats.core import GAP_POLICIES
 from ..stats.edof import EDOF_METHODS
-from ..stats.greenhall import GREENHALL_RUN_POLICIES
 from ..export import TABLE_FORMATS
 from ..io.write import FORMATS, TIME_COLUMNS
 from ..stats.powerlaw import WEIGHT_METHODS
@@ -31,8 +30,10 @@ from ..stats.window import WINDOWS
 from ..stream.davar import STEP_DIVISOR
 from ..tau import MODES
 from .common import (NO_INTERVAL, _add_input_args, _confidence_for,
-                     _load, _nan_to_none, _summary)
+                     _load, _nan_to_none)
 from .docs import add_docs
+from .edof import add_compare_edof
+from .estimators import add_estimators, add_wdev
 from .gui import add_gui
 from .plot import add_plot
 from .preprocess import add_stats
@@ -60,135 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_validate(sub)
     add_stats(sub)
 
-    from ..stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, theobr,
-                    theoh, tierms, totdev)
+    add_estimators(sub)
 
-    for name, fn in (
-        ("adev", adev),
-        ("oadev", oadev),
-        ("mdev", mdev),
-        ("tdev", tdev),
-        ("ohdev", ohdev),
-        ("totdev", totdev),
-        ("theo1", theo1),
-        ("theobr", theobr),
-        ("theoh", theoh),
-        ("mtie", mtie),
-        ("tierms", tierms),
-    ):
-        p = sub.add_parser(name, help=_summary(fn))
-        _add_input_args(p)
-        p.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
-        p.add_argument("--max-af", type=int, help="largest averaging factor")
-        p.add_argument(
-            "--gap-policy",
-            default="auto",
-            choices=GAP_POLICIES,
-            help="how a gap affects nearby terms; see `stabilis docs gaps`",
-        )
-        if name in NO_INTERVAL:
-            p.add_argument("--json", action="store_true", help="emit JSON")
-            p.set_defaults(func=_cmd_estimate, estimator=fn,
-                           estimator_name=name, no_confidence=True,
-                           edof_method="auto", confidence=ONE_SIGMA)
-            continue
-        p.add_argument(
-            "--confidence",
-            type=float,
-            default=ONE_SIGMA,
-            help="confidence level for the sigma bounds (default: 1 sigma, 0.6827)",
-        )
-        p.add_argument(
-            "--edof-method",
-            default="auto",
-            choices=EDOF_METHODS,
-            help="degrees-of-freedom estimator; see `stabilis docs edof`",
-        )
-        p.add_argument(
-            "--alpha",
-            type=int,
-            choices=(2, 1, 0, -1, -2, -3, -4),
-            help="power law to assume, with --edof-method greenhall. Omit to "
-            "identify it per tau; pass Stable32's Alpha column to reproduce "
-            "one of its runs exactly. See `stabilis docs greenhall`",
-        )
-        p.add_argument(
-            "--run-policy",
-            default="pool",
-            choices=GREENHALL_RUN_POLICIES,
-            help="on a gapped record, whether greenhall pools the runs or "
-            "declines to them (default: pool)",
-        )
-        p.add_argument(
-            "--no-confidence",
-            action="store_true",
-            help="skip the bounds; also frees the coefficient arrays, which "
-            "matter on a record of millions of points",
-        )
-        p.add_argument("--json", action="store_true", help="emit JSON")
-        p.set_defaults(func=_cmd_estimate, estimator=fn, estimator_name=name)
+    add_wdev(sub)
 
-    # wdev gets its own parser rather than a place in the loop above: its
-    # scales are dyadic by construction, so --taus and --max-af have nothing
-    # to act on, and the MODWT masks gaps rather than choosing a policy.
-    from ..stats.wavelet import FILTERS, wdev
-
-    p_w = sub.add_parser(
-        "wdev", help=_summary(wdev))
-    _add_input_args(p_w)
-    p_w.add_argument(
-        "--filter", default="haar", choices=sorted(FILTERS),
-        help="wavelet family. haar (K=1) reproduces the overlapping ADEV "
-             "exactly; d4 (K=2) additionally annihilates a linear frequency "
-             "drift, d6 a quadratic, d8 a cubic",
-    )
-    p_w.add_argument(
-        "--levels", type=int,
-        help="stop after this many octaves (default: as many as the record "
-             "supports)",
-    )
-    p_w.add_argument(
-        "--biased", action="store_true",
-        help="keep the coefficients that wrapped the circular boundary. "
-             "Shift-invariant and wrong: it treats the end of the record as "
-             "adjacent to its start",
-    )
-    p_w.add_argument(
-        "--confidence", type=float, default=ONE_SIGMA,
-        help="confidence level for the sigma bounds (default: 1 sigma)",
-    )
-    p_w.add_argument(
-        "--edof-method", default="auto", choices=EDOF_METHODS,
-        help="degrees-of-freedom estimator; see `stabilis docs edof`",
-    )
-    p_w.add_argument(
-        "--no-confidence", action="store_true", help="skip the bounds")
-    p_w.add_argument("--json", action="store_true", help="emit JSON")
-    p_w.set_defaults(func=_cmd_wdev, estimator_name="wdev",
-                     alpha=None, run_policy="pool")
-
-    p_cmp = sub.add_parser(
-        "compare-edof",
-        help="every EDOF method side by side, and what each does to the bounds",
-    )
-    _add_input_args(p_cmp)
-    p_cmp.add_argument(
-        "--estimator", default="oadev",
-        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "totdev")
-    )
-    p_cmp.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
-    p_cmp.add_argument("--max-af", type=int, help="largest averaging factor")
-    p_cmp.add_argument(
-        "--confidence", type=float, default=ONE_SIGMA, help="confidence level"
-    )
-    p_cmp.add_argument(
-        "--alpha",
-        type=int,
-        choices=(2, 1, 0, -1, -2, -3, -4),
-        help="power law for the greenhall column; omit to identify per tau",
-    )
-    p_cmp.add_argument("--json", action="store_true", help="emit JSON")
-    p_cmp.set_defaults(func=_cmd_compare_edof)
+    add_compare_edof(sub)
 
     p_pl = sub.add_parser(
         "powerlaw",
@@ -1045,173 +922,14 @@ def _cmd_export_bundle(args) -> int:
 
 
 
-def _step_params(result, action: str) -> dict:
-    """Parameters of the last step with this action. The audit trail, reused."""
-    return [s for s in result.provenance.steps if s.action == action][-1].params
 
 
-def _cmd_estimate(args) -> int:
-    """Run one estimator and print the tau table.
-
-    Column layout deliberately mirrors Stable32's -- AF, Tau, #, Min Sigma,
-    Sigma, Max Sigma -- so a user migrating can diff the two outputs
-    directly. The extra EDOF column is not in Stable32's output and is the
-    point of difference: it says how much data each bound rests on, and
-    which estimator produced it.
-    """
-    series = _load(args)
-    want_ci = not args.no_confidence
-    extra = {} if args.estimator_name in NO_INTERVAL else {
-        "keep_coeffs": want_ci}
-    result = args.estimator(
-        series,
-        taus=args.taus,
-        max_af=args.max_af,
-        gap_policy=args.gap_policy,
-        **extra,
-    )
-    want_ci = want_ci and result.is_variance
-    policy = _step_params(result, "evaluate")
-    ci = _confidence_for(args, result, series) if want_ci else None
-    header = (f"# tau grid: {args.taus}   n = {series.n}   "
-              f"rate = {series.rate_hz:g} Hz")
-    if series.n_gaps:
-        header += (
-            f"\n# {series.n_gaps} gaps, {policy['runs']} gap-free runs, "
-            f"policy '{policy['gap_policy']}', longest run {policy['longest_run']}"
-        )
-    return _print_result(args, result, ci, header)
 
 
-def _print_result(args, result, ci, header: str) -> int:
-    """The tau table, shared by every estimator that prints one."""
-    if args.json:
-        # One implementation of the result schema, in `export.table`, so the
-        # command line and the library file cannot drift apart.
-        from ..export import to_json as result_json
-
-        print(result_json(result, ci))
-        return 0
-
-    print(f"# {result.kind.upper()} for {args.path}")
-    print(header)
-    name = result.kind.upper()
-    if ci is None:
-        print(f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}  {name:>14}")
-        for af, tau, n, dev in zip(result.af, result.tau_s, result.n_terms, result.dev):
-            print(f"{af:>7}  {tau:>13.4e}  {n:>8}  {dev:>14.6e}")
-        return 0
-
-    basis = "an assumed power law" if ci.alpha is not None else "data-driven EDOF"
-    print(f"# bounds at {ci.level:.4%} confidence, chi-square on {basis}")
-    alpha_col = f"  {'Alpha':>5}" if ci.alpha is not None else ""
-    print(
-        f"{'AF':>7}  {'Tau (s)':>13}  {'#':>8}{alpha_col}  {'Min ' + name:>14}  "
-        f"{name:>14}  {'Max ' + name:>14}  {'EDOF':>9}  {'via':>9}"
-    )
-    alphas = ci.alpha if ci.alpha is not None else [None] * result.af.size
-    rows = zip(
-        result.af, result.tau_s, result.n_terms, alphas, ci.dev_lo, result.dev,
-        ci.dev_hi, ci.edof, ci.method,
-    )
-    for af, tau, n, a, lo, dev, hi, eta, how in rows:
-        # A declined point has no assumed power law, so the column is blank
-        # rather than carrying the sentinel out into the user's table.
-        shown = "" if a is None else ("" if how != "greenhall" else f"{a:d}")
-        cell = f"  {shown:>5}" if ci.alpha is not None else ""
-        print(
-            f"{af:>7}  {tau:>13.4e}  {n:>8}{cell}  {lo:>14.6e}  {dev:>14.6e}  "
-            f"{hi:>14.6e}  {eta:>9.1f}  {how:>9}"
-        )
-    reasons = sorted({d for d in ci.declined if d})
-    for why in reasons:
-        print(f"# declined greenhall where: {why}")
-    return 0
 
 
-def _cmd_wdev(args) -> int:
-    """The wavelet deviation, on the Allan scale and one row per octave.
-
-    Same table as every other estimator, because with the Haar filter it is
-    the same number: `wdev --filter haar` and `oadev` agree at every shared
-    tau, bounds included. The `--filter` column is where they part company.
-    """
-    from ..stats.wavelet import FILTERS, wdev
-
-    series = _load(args)
-    want_ci = not args.no_confidence
-    result = wdev(series, name=args.filter, levels=args.levels,
-                  unbiased=not args.biased, keep_coeffs=want_ci)
-    ci = _confidence_for(args, result, series) if want_ci else None
-    step = _step_params(result, "wavelet_variance")
-    header = (f"# filter: {args.filter}, K = {FILTERS[args.filter]} vanishing "
-              f"moments   n = {series.n}   rate = {series.rate_hz:g} Hz")
-    if series.n_gaps:
-        header += (f"\n# {series.n_gaps} gaps masked "
-                   f"{step['coefficients_masked']} coefficients")
-    return _print_result(args, result, ci, header)
 
 
-def _cmd_compare_edof(args) -> int:
-    """Every EDOF method on one dataset, and what each costs in bounds.
-
-    The diagnostic that makes the design argument concrete. `eta1` reads
-    the degrees of freedom off the data; `eta3` counts non-overlapping
-    windows and is a deliberate lower bound; `greenhall` assumes a power
-    law and is what Stable32 prints. Where they disagree is where the
-    assumption is doing the work, and a metrologist deciding which number
-    to put on a certificate should be able to see that in one table.
-    """
-    from ..registry import get
-
-    series = _load(args)
-    result = get("estimator", args.estimator)(
-        series, taus=args.taus, max_af=args.max_af
-    )
-    cis = {}
-    for method in ("eta1", "eta3", "greenhall"):
-        cis[method] = confidence(
-            result, level=args.confidence, method=method,
-            alpha=args.alpha, series=series,
-        )
-    greenhall = cis["greenhall"]
-
-    if args.json:
-        print(json.dumps({
-            "kind": result.kind,
-            "af": result.af.tolist(),
-            "tau_s": result.tau_s.tolist(),
-            "dev": result.dev.tolist(),
-            "alpha": greenhall.alpha.tolist(),
-            "edof": {k: v.edof.tolist() for k, v in cis.items()},
-            "dev_lo": {k: v.dev_lo.tolist() for k, v in cis.items()},
-            "dev_hi": {k: v.dev_hi.tolist() for k, v in cis.items()},
-            "method_used": {k: list(v.method) for k, v in cis.items()},
-            "declined": list(greenhall.declined),
-            "provenance": to_dict(greenhall.provenance),
-        }, indent=2, default=str))
-        return 0
-
-    print(f"# EDOF comparison for {args.path}, {result.kind}")
-    print(f"# bounds at {args.confidence:.4%}; ratio is the width of the "
-          "greenhall interval over eta1's")
-    print(
-        f"{'AF':>7}  {'Tau (s)':>13}  {'Alpha':>5}  {'eta1':>9}  {'eta3':>9}  "
-        f"{'greenhall':>9}  {'via':>9}  {'width g/1':>9}"
-    )
-    for i, af in enumerate(result.af.tolist()):
-        used = greenhall.method[i]
-        a = "" if used != "greenhall" else f"{greenhall.alpha[i]:d}"
-        width_1 = cis["eta1"].dev_hi[i] - cis["eta1"].dev_lo[i]
-        width_g = greenhall.dev_hi[i] - greenhall.dev_lo[i]
-        print(
-            f"{af:>7}  {result.tau_s[i]:>13.4e}  {a:>5}  "
-            f"{cis['eta1'].edof[i]:>9.1f}  {cis['eta3'].edof[i]:>9.1f}  "
-            f"{greenhall.edof[i]:>9.1f}  {used:>9}  {width_g / width_1:>9.2f}"
-        )
-    for why in sorted({d for d in greenhall.declined if d}):
-        print(f"# declined greenhall where: {why}")
-    return 0
 
 
 def _cmd_powerlaw(args) -> int:

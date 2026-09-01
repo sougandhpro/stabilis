@@ -18,7 +18,6 @@ import argparse
 from pathlib import Path
 
 from ..stats import ONE_SIGMA
-from ..stats.edof import EDOF_METHODS
 from ..tau import MODES
 from .common import _add_input_args, _confidence_for, _load
 
