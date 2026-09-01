@@ -33,31 +33,12 @@ from ..stats.psd import DETRENDS, KINDS as PSD_KINDS
 from ..stats.window import WINDOWS
 from ..stream.davar import STEP_DIVISOR
 from ..tau import MODES
+from .common import (NO_INTERVAL, _add_input_args, _confidence_for,
+                     _load, _nan_to_none, _summary)
 
 __all__ = ["main", "build_parser"]
 
 _LOG_LEVELS = ("debug", "info", "warning", "error")
-
-# Estimators with no confidence interval today, for two different reasons,
-# and offering the flags anyway would be worse than not having them. MTIE
-# and TIE rms are not variances at all, so the chi-square interval does not
-# apply and `confidence` refuses them. The Thêo family *is* a variance
-# family, but it reports no coefficient arrays for the data-driven path and
-# its own EDF (SP 1065 Table 9) is not implemented -- see theory/theoh.md.
-# None of them takes `keep_coeffs` either, which is why this one list drives
-# both decisions.
-NO_INTERVAL = ("mtie", "tierms", "theo1", "theobr", "theoh")
-
-
-def _summary(fn) -> str:
-    """First docstring line, safe to hand to argparse as help text.
-
-    argparse runs every help string through `%`-formatting, so a bare
-    percent sign in a docstring -- "75 % of the record length" -- is read
-    as a conversion spec and `--help` dies with a TypeError instead of
-    printing. Doubling it is the documented escape.
-    """
-    return fn.__doc__.splitlines()[0].replace("%", "%%")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -697,49 +678,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_input_args(p: argparse.ArgumentParser,
-                    required_path: bool = True) -> None:
-    """Input arguments shared by every data-consuming subcommand.
-
-    `required_path=False` for a subcommand that also has a listing mode and
-    so can be run with no file at all.
-    """
-    if required_path:
-        p.add_argument("path", help="input data file")
-    else:
-        p.add_argument("path", nargs="?", help="input data file")
-    p.add_argument(
-        "--kind",
-        choices=("phase", "frequency"),
-        default="phase",
-        help="whether the column holds phase in seconds or fractional frequency",
-    )
-    p.add_argument("--rate", type=float, help="sample rate in Hz")
-    p.add_argument("--column", type=int, default=0, help="data column, 0-based")
-    p.add_argument("--time-column", type=int, help="timetag column, to infer --rate")
-    p.add_argument("--delimiter", help="override delimiter sniffing")
-    p.add_argument(
-        "--gap-value",
-        type=float,
-        help="value marking a gap (Stable32 writes 0; not assumed)",
-    )
-
-
-def _load(args):
-    """Read the input file into a PhaseSeries or FreqSeries."""
-    from ..io import load_frequency, load_phase
-
-    loader = load_phase if args.kind == "phase" else load_frequency
-    return loader(
-        args.path,
-        rate_hz=args.rate,
-        column=args.column,
-        time_column=args.time_column,
-        delimiter=args.delimiter,
-        gap_value=args.gap_value,
-    )
-
-
 def _cmd_mask(args) -> int:
     """Does this unit meet spec -- the question a calibration report answers.
 
@@ -927,11 +865,6 @@ def _cmd_psd(args) -> int:
         if fi > 0.0:
             print(f"{fi:>14.6e}  {pi:>14.6e}")
     return 0
-
-
-def _nan_to_none(a):
-    """NaN is not JSON. A withheld value is `null`, which parsers understand."""
-    return [None if not np.isfinite(v) else float(v) for v in a]
 
 
 def _cmd_davar(args) -> int:
@@ -1248,22 +1181,6 @@ def _cmd_validate(args) -> int:
 def _step_params(result, action: str) -> dict:
     """Parameters of the last step with this action. The audit trail, reused."""
     return [s for s in result.provenance.steps if s.action == action][-1].params
-
-
-def _confidence_for(args, result, series):
-    """Bounds for one result, wiring up the noise-type arguments.
-
-    `series` is handed through only for `greenhall`, which needs a power
-    law and identifies one per tau when `--alpha` was not given.
-    """
-    return confidence(
-        result,
-        level=args.confidence,
-        method=args.edof_method,
-        alpha=getattr(args, "alpha", None),
-        series=series,
-        run_policy=getattr(args, "run_policy", "pool"),
-    )
 
 
 def _cmd_estimate(args) -> int:
