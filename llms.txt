@@ -1,0 +1,159 @@
+# stabilis
+
+> A frequency stability analysis engine: the Allan variance family, wavelet
+> variance, power spectra, multi-channel noise rejection, and confidence
+> intervals that do not require guessing the noise type first. Pure numpy
+> core, MPL-2.0, importable as a library and drivable from a CLI.
+
+This file is written for a language model that has been asked to use
+stabilis from *another* project. It gives the install, the shape of the
+API, and the mistakes worth not making. It deliberately does **not**
+restate signatures or list every public name: those are generated from the
+source and would go stale here. Fetch them from the generated references
+below, or ask the installed package directly.
+
+Canonical location: <https://github.com/sougandhkm/stabilis>
+
+## Install
+
+There is no PyPI release. The git URL is the distribution channel, and the
+repository is public, so no credentials are involved.
+
+```bash
+pip install "stabilis @ git+https://github.com/sougandhkm/stabilis.git@main"
+```
+
+`numpy>=1.24` is the only hard dependency. Extras: `[plot]` pulls
+matplotlib, `[fast]` pulls scipy, `[serial]` pulls pyserial, `[dev]` pulls
+pytest. **scipy and matplotlib are never required for a correct number** —
+a test asserts the package imports and computes with both absent — so do
+not add them to a consuming project on stabilis' account.
+
+Pin a commit-ish whenever the result will be quoted or reported:
+
+```bash
+pip install "stabilis @ git+https://github.com/sougandhkm/stabilis.git@<sha-or-tag>"
+```
+
+Verify a fresh install on the machine that will use it:
+
+```bash
+python3 -c "import stabilis; print(stabilis.__version__)"
+stabilis validate          # re-runs the full evidence hierarchy; exit status is the verdict
+```
+
+## Interfaces
+
+There are three, and they are the same engine.
+
+1. **Python library** — `import stabilis`. This is the primary interface
+   and the one to reach for.
+2. **CLI** — the `stabilis` console script. Every estimator subcommand
+   takes `--json`, which is the right way for a program or an agent to
+   consume a result without parsing a human table.
+3. **Local HTTP API** — `stabilis gui` starts `http.server` on
+   `127.0.0.1:8765` and opens a browser page. **It binds to loopback only,
+   by design**: the page reads files from the machine it runs on, so a
+   wider bind hands a stranger a file reader. It is a UI for a human at
+   that machine, *not* a service to call across a network. Do not point a
+   remote project at it, and do not "fix" the bind. If a networked service
+   is wanted, that is unwritten work, not a configuration flag.
+
+## The shape of the library
+
+The contract is a short pipeline, and every stage is a frozen dataclass.
+
+```python
+import stabilis
+
+series = stabilis.load_phase("run.dat", rate_hz=1.0)   # or load_frequency
+result = stabilis.oadev(series, taus="octave")         # -> StabilityResult
+ci     = stabilis.confidence(result)                   # -> Confidence
+
+for tau, dev, lo, hi in zip(result.tau_s, result.dev, ci.dev_lo, ci.dev_hi):
+    print(f"{tau:10.4g} s   {dev:.4e}   [{lo:.4e}, {hi:.4e}]")
+
+print(stabilis.identify(series).name)                  # e.g. 'white FM'
+```
+
+- `PhaseSeries` / `FreqSeries` are immutable and carry `rate_hz`, `epoch`
+  and a `Provenance`. Convert with `to_phase` / `to_frequency`.
+- `StabilityResult` carries the variance (`.var`) and exposes the deviation
+  as `.dev`; also `.tau_s`, `.af`, `.n_terms`, `.coeffs` and
+  `.is_variance`. **Estimators return variances; `.dev` is the square
+  root.** Do not average or fit deviations — see the traps below.
+- `Confidence` carries `.dev_lo` / `.dev_hi` (and `.var_lo` / `.var_hi`),
+  the `.edof` behind them, the `.method` actually used per tau, and
+  `.declined` where it refused to quote one.
+- Everything carries `Provenance` — every step taken and every decision
+  taken on your behalf (tau grid, gap policy, EDOF estimator, assumed
+  bandwidth). When reporting a number, report its provenance with it.
+
+The names in `stabilis.__all__` are the stable public API and do not move
+without a version bump; anything reached through a submodule path may.
+Ask the installed copy rather than trusting a list written here:
+
+```python
+import stabilis; print(stabilis.__all__)
+```
+
+`stabilis.plot`, `stabilis.bench` and `stabilis.report` stay off the top
+level on purpose — the first two would drag matplotlib into every import,
+and `bench` is an optional setup model. Import them by path when needed.
+
+## Traps worth knowing before writing code
+
+These are design decisions, not bugs. Fighting them produces wrong numbers.
+
+- **Fit and average variances, never deviations.** `E[σ̂] = σ·√(2/η)·Γ((η+1)/2)/Γ(η/2)`;
+  at η = 2 that is 0.8862, so the longest-tau deviation runs ~11 % low on
+  average — exactly where a customer's spec lives.
+- **Gapped frequency data is segmented, never masked.** `cumsum` propagates
+  NaN to the end of a record, so one missing sample silently discards the
+  rest. Frequency input carrying a gap *refuses* `gap_policy="mask"`
+  outright. Take the refusal rather than routing around it.
+- **A gap value is never assumed.** Stable32 writes `0` for a gap, which is
+  also a legitimate measurement; pass `gap_value=` explicitly if the file
+  uses that convention.
+- **The carrier frequency is required, not guessed**, for `S_φ` and `L(f)`.
+  A spectrum converted with a guessed carrier is wrong by a constant that
+  nothing downstream can detect. `L(f)` is *withheld* where the phase
+  excursion is too large for `L = S_φ/2`.
+- **Refusals are load-bearing.** A limit-mask verdict of `not evaluated`, a
+  withheld `L(f)`, a `Confidence.declined` entry and a fit that will not
+  quote parameters outside its admissible deviance are all deliberate. Do
+  not paper over them with a default; report them.
+- **Conformity is decided on the interval, not the point.** A deviation
+  that sits under a limit but whose error bar crosses it has not passed.
+- **Published ADEV tables all trace to Stable32**, so agreement with them
+  proves interoperability, not correctness. Label such comparisons INTEROP.
+  Correctness rests on the analytic identities and the Monte-Carlo coverage
+  that `stabilis validate` measures.
+- **No pickle support, ever.** `.npy` covers the need without the
+  code-execution vector.
+
+## Where the authoritative detail lives
+
+Every one of these is generated from, or ships with, the source — prefer
+them to anything remembered.
+
+| Want | Where |
+| --- | --- |
+| Exact signatures of every public name | [`docs/api/index.md`](https://github.com/sougandhkm/stabilis/blob/main/docs/api/index.md) |
+| Every command, flag and default | [`docs/cli-reference.md`](https://github.com/sougandhkm/stabilis/blob/main/docs/cli-reference.md) |
+| Why an estimator is defined as it is | `stabilis docs --list`, then `stabilis docs <topic>` — the theory pages, which ship *inside* the package |
+| What is proven, and how | `stabilis validate`, and `docs/validation-report.html` |
+| What is **not** yet proven | [`VALIDATION-DEBT.md`](https://github.com/sougandhkm/stabilis/blob/main/VALIDATION-DEBT.md) |
+| What exists and what it measured | [`README.md`](https://github.com/sougandhkm/stabilis/blob/main/README.md) |
+
+Raw text, for fetching rather than rendering, is at
+`https://raw.githubusercontent.com/sougandhkm/stabilis/main/<path>`.
+
+The API and CLI references are regenerated by `docs/make_api.py` and
+`docs/make_cli.py`, and a test fails when either is stale — so a signature
+cannot drift away from its description. Do not hand-edit them.
+
+## Licence
+
+MPL-2.0. It may be embedded in closed products, including commercial test
+rigs and instrument firmware; modifications to these files come back.

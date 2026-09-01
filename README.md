@@ -44,14 +44,80 @@ party from a clean checkout, and to be capable of failing.
 
 ## Install
 
-```bash
-pip install -e ".[dev,plot]"          # working on stabilis itself
-pip install /path/to/stabilis         # using it from another project
-```
-
 The core needs only numpy. `scipy` and `matplotlib` are optional and are
 never required for a correct answer — there is a test asserting the
 package imports and computes with both absent.
+
+### From another project, on any machine
+
+```bash
+pip install "stabilis @ git+https://github.com/sougandhkm/stabilis.git@main"
+pip install "stabilis[plot] @ git+https://github.com/sougandhkm/stabilis.git@main"
+```
+
+That is the whole install. There is no PyPI release yet, so the git URL is
+the distribution channel; it needs no credentials because the repository is
+public.
+
+**Pin it when the number has to be reproducible.** A measurement quoted in
+a report should name the code that produced it, and `@main` moves:
+
+```bash
+pip install "stabilis @ git+https://github.com/sougandhkm/stabilis.git@6a548f2"
+```
+
+Any commit-ish works — a tag, a branch, a full or short SHA. `Provenance`
+records what was done to the data; the pin records what did it.
+
+### Tracking the tip, on a machine that will follow along
+
+Two ways, and they differ in what "update" costs.
+
+```bash
+# A checkout that follows: `git pull` is the whole update, no reinstall.
+git clone https://github.com/sougandhkm/stabilis.git
+cd stabilis && pip install -e ".[dev,plot]"
+git pull                              # every later update, and that is all
+```
+
+An editable install puts a link on `sys.path` rather than a copy in
+`site-packages`, so the next `import stabilis` in any project on that
+machine already sees the pulled commit. Nothing to reinstall, nothing to
+remember. This is the right shape for a development machine, and for any
+machine where you will also want to run the test suite or `stabilis
+validate` against a specific commit.
+
+```bash
+# A plain install that is re-pulled on demand.
+pip install --upgrade --force-reinstall --no-deps \
+    "stabilis @ git+https://github.com/sougandhkm/stabilis.git@main"
+```
+
+`--force-reinstall` is not superstition: pip treats a direct URL whose
+version string has not changed as already satisfied, and this project's
+version moves far more slowly than its commits do, so a plain `--upgrade`
+can silently leave you on last month's code. `--no-deps` keeps numpy where
+it is instead of dragging the whole tree through a reinstall.
+
+Whichever route, ask the installed package what it is rather than assuming:
+
+```bash
+python3 -c "import stabilis; print(stabilis.__version__)"
+stabilis validate                     # 38/38, and a digest over the evidence
+```
+
+`stabilis validate` is the honest check that a remote machine got a working
+copy: it re-runs the analytic identities, the exact-rational oracle, the
+Monte-Carlo coverage and the Stable32 interop fixtures on *that* machine,
+and its exit status is the verdict. A copy that installed but computes
+differently — a broken numpy, a truncated download — fails it.
+
+### Working on stabilis itself
+
+```bash
+pip install -e ".[dev,plot]"
+python3 -m pytest -q
+```
 
 ## Using it
 
@@ -95,8 +161,9 @@ figure path wants matplotlib for the same reason as `plot`.
 | What a command does | [`docs/cli-reference.md`](docs/cli-reference.md) |
 | What is proven, and how | `stabilis validate` |
 | What is *not* yet proven | [`VALIDATION-DEBT.md`](VALIDATION-DEBT.md) |
+| How to use this from another project, or from an LLM | [`llms.txt`](llms.txt) |
 
-The 36 theory pages ship inside the package, so they survive a `pip
+The theory pages ship inside the package, so they survive a `pip
 install` and are readable on a machine that never saw this repository. The
 API and CLI references are generated from the source tree — `python3
 docs/make_api.py` and `python3 docs/make_cli.py` — and a test fails if

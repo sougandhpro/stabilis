@@ -12,10 +12,11 @@ Two of them are generated from the source and must never be hand-edited.
 | What is proven, and how | `stabilis validate`, [`validation-report.html`](validation-report.html) |
 | What is *not* yet proven | [`../VALIDATION-DEBT.md`](../VALIDATION-DEBT.md) |
 | What has been built so far, with measured numbers | [`stabilis-progress.pdf`](stabilis-progress.pdf) |
+| How to consume this from another project, or from an LLM | [`../llms.txt`](../llms.txt) |
 
 ## The theory pages
 
-The 36 theory pages ship *inside* the package, in `src/stabilis/theory/`,
+The theory pages ship *inside* the package, in `src/stabilis/theory/`,
 rather than here — so they survive a `pip install` and can be read on a
 machine that never saw the source tree:
 
