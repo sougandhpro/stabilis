@@ -353,6 +353,49 @@ threshold. A simultaneous band would need the window-to-window correlation
 this library does compute for τ (`stats/taucov.py`) applied along the other
 axis — real work, and not yet done.
 
+## 11. The non-Haar wavelet variances have no anchor on their level
+
+**Status: open, cheap to close, and the machinery already exists.**
+
+`theory/wavelet.md` says the family is validated, and for `haar` that is
+exact: `2·ν²_Haar(τ) = oavar(τ)` to 1e-14 over eleven octaves, against a
+path already certified to fourteen digits. For `d4`, `d6` and `d8` there is
+no such anchor, and reading what `tests/test_wavelet.py` actually asserts
+shows why. The filter algebra certifies the *filters*, not the variance.
+Drift annihilation is a **ratio** of dirty to clean at the same filter, so
+any normalization cancels. The EDOF check scores `eta1` against
+`2·mean²/var`, both scale-free, and covers `d4` and `d8` only — `d6` has no
+EDOF check at all. Shift equivariance and invariance are `d4`-only and also
+scale-free.
+
+**So a constant multiplicative error in the D4/D6/D8 wavelet variance, or a
+wrong `tau_j ↔ level` assignment for the longer filters, would pass the
+entire shipped suite.** The exposure is narrow — the `1/sqrt(2)`
+normalization and the level loop in `modwt` are shared with the Haar case
+that *is* anchored, and `||g|| = 1` and `sum g = sqrt(2)` are certified per
+filter — but narrow is not the same as checked, and this file exists to say
+which is which. There is also no wavelet row in `validate/report.py`, which
+`CLAUDE.md` requires of every estimator.
+
+Stable32 cannot close it: the parity matrix marks wavelet variance as
+absent from Stable32, so no fixture can exist and none should be
+manufactured. This is exactly the case the analytic tier was built for.
+
+**How it discharges.** `validate/report.py::_exact_generator_avar` already
+computes `E[avar]` exactly from the Kasdin–Walter impulse response — no
+Monte Carlo, no tolerance — because `y = h ⊛ w` makes the estimator one
+fixed linear functional of the driving white noise, so `g = a ⊛ h` and
+`E[σ²] = scale·(g·g)`. It is written for the Allan kernel alone. The
+generalization needs no new mathematics per estimator: the coefficient
+function *is* the kernel, so running it on the impulse response yields `g`
+directly, and `scale` comes from the `variance = scale·mean(c²)` contract
+that every estimator already honours. That gives every Daubechies order a
+machine-precision expected value at a known `h_alpha`, and the same routine
+then widens to TOTVAR and the Thêo family, which today are validated only
+as *bias ratios* to AVAR and have no absolute `E[σ²(τ)]` anywhere in this
+repository. MTIE stays out: it is an extreme-value statistic and not a
+linear functional of the record.
+
 ---
 
 ## Not debt

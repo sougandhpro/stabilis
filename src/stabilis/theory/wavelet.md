@@ -145,8 +145,9 @@ not an argument for improvising an interpolation here.
 
 ## Validation status
 
-**Validated.** `tests/test_wavelet.py`: the filter algebra for every family;
-the Allan identity to 1e-14 over eleven octaves, from both phase and
+**Validated for `haar`; validated in structure but not in *level* for
+`d4`, `d6` and `d8`.** `tests/test_wavelet.py`: the filter algebra for every
+family; the Allan identity to 1e-14 over eleven octaves, from both phase and
 frequency input; shift equivariance of the coefficients as bit equality;
 shift invariance of the biased variance to 1e-14; the deliberate
 *non*-invariance of the unbiased one; the drift annihilation table above;
@@ -154,6 +155,15 @@ the EDOF against Monte-Carlo truth for `d4` and `d8`; the Haar confidence
 interval against the overlapping Allan one; and the gap accounting.
 `tests/test_docs_and_cli.py` runs the same identity through the CLI, since
 that is where a user meets it.
+
+What that list does **not** contain is a check on the absolute level of
+any filter but `haar`. The drift ratio, the EDOF ratio and the shift
+invariances are every one of them scale-free, so a constant
+multiplicative error in the `d4`/`d6`/`d8` variance would pass all of
+them. Only `haar` is pinned, by the Allan identity. See
+`VALIDATION-DEBT.md` item 11 for what closes it: the generator's exact
+`E[sigma^2]` from its impulse response, which needs no new mathematics
+per estimator because the coefficient function is the kernel.
 
 ## Not yet
 
