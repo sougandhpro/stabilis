@@ -16,7 +16,6 @@ from pathlib import Path
 import numpy as np
 
 from .. import __version__
-from ..fitting import DEFAULT_BOOTSTRAP, OBJECTIVES
 from ..log import configure
 from ..provenance import to_dict
 from ..stats import ONE_SIGMA, confidence
@@ -24,17 +23,18 @@ from ..stats.core import GAP_POLICIES
 from ..stats.edof import EDOF_METHODS
 from ..export import TABLE_FORMATS
 from ..io.write import FORMATS, TIME_COLUMNS
-from ..stats.powerlaw import WEIGHT_METHODS
 from ..stream.davar import STEP_DIVISOR
 from ..tau import MODES
 from .common import _add_input_args, _confidence_for, _load, _nan_to_none
 from .docs import add_docs
 from .edof import add_compare_edof
 from .estimators import add_estimators, add_wdev
+from .fitting import add_fit
 from .gui import add_gui
 from .mask import add_mask
 from .plot import add_plot
 from .preprocess import add_stats
+from .powerlaw import add_powerlaw
 from .psd import add_psd
 from .spur import add_spur
 from .validate import add_validate
@@ -67,76 +67,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_compare_edof(sub)
 
-    p_pl = sub.add_parser(
-        "powerlaw",
-        help="decompose sigma(tau) into IEEE 1139 h_alpha levels and drift",
-    )
-    _add_input_args(p_pl)
-    p_pl.add_argument("--taus", default="octave", choices=MODES, help="tau grid")
-    p_pl.add_argument("--max-af", type=int, help="largest averaging factor")
-    p_pl.add_argument(
-        "--fh",
-        type=float,
-        help="measurement system bandwidth in Hz. NOT identifiable from the "
-        "data -- omit it and Nyquist is assumed and the result says so",
-    )
-    p_pl.add_argument(
-        "--weights",
-        default="edof",
-        choices=WEIGHT_METHODS,
-        help="row weighting; 'edof' uses each point's own sampling uncertainty",
-    )
-    p_pl.add_argument("--json", action="store_true", help="emit JSON")
-    p_pl.set_defaults(func=_cmd_powerlaw)
+    add_powerlaw(sub)
 
-    p_fit = sub.add_parser(
-        "fit",
-        help="fit a model to a measured sigma-tau curve, with uncertainties "
-             "that count the correlation between taus",
-    )
-    _add_input_args(p_fit)
-    # Deliberately not a `choices` list: a third-party model registered
-    # through the plugin entry points is as valid as a built-in, and
-    # `registry.get` already refuses an unknown name with the full list --
-    # including those plugins, which a `choices` fixed at parser-build time
-    # would not.
-    p_fit.add_argument(
-        "--model", default="powerlaw",
-        help="model name -- powerlaw, drift, gauss_markov, quantization, "
-             "bump, or a registered plugin. Use `stabilis powerlaw` instead "
-             "for the IEEE 1139 decomposition, which is an exact solve "
-             "rather than an optimization",
-    )
-    p_fit.add_argument(
-        "--estimator", default="oadev",
-        choices=("adev", "oadev", "mdev", "tdev", "ohdev", "totdev"),
-        help="which curve to fit. A decimating estimator such as adev has no "
-             "measurable cross-tau correlation, so its error bars come back "
-             "as lower bounds",
-    )
-    p_fit.add_argument("--taus", default="octave", choices=MODES,
-                       help="tau grid")
-    p_fit.add_argument("--max-af", type=int, help="largest averaging factor")
-    p_fit.add_argument(
-        "--objective", default="ml", choices=OBJECTIVES,
-        help="'ml' is the exact chi-square likelihood; the others are for "
-             "comparability with tools that fit differently",
-    )
-    p_fit.add_argument(
-        "--freeze", action="append", metavar="NAME=VALUE", default=[],
-        help="hold a parameter at a value; repeatable",
-    )
-    p_fit.add_argument(
-        "--bootstrap", type=int, default=0, metavar="N",
-        help=f"resampled refits for a percentile interval "
-             f"(a typical run is {DEFAULT_BOOTSTRAP}); 0 skips it",
-    )
-    p_fit.add_argument("--seed", type=int,
-                       help="seed for the bootstrap, so a report is reproducible")
-    p_fit.add_argument("--level", type=float, default=ONE_SIGMA,
-                       help="confidence level (default: one sigma)")
-    p_fit.add_argument("--json", action="store_true", help="emit JSON")
-    p_fit.set_defaults(func=_cmd_fit)
+    add_fit(sub)
 
     p_x = sub.add_parser(
         "cross",
@@ -693,183 +626,10 @@ def _cmd_export_bundle(args) -> int:
 
 
 
-def _cmd_powerlaw(args) -> int:
-    """Decompose a measured curve into IEEE 1139 noise levels and drift.
-
-    Stacks the overlapping Allan and modified Allan curves of the same
-    record, because the two PM noises do not separate from AVAR alone. The
-    fit is a non-negative least squares, so no level ever comes back
-    negative and the solution carries an optimality certificate.
-    """
-    from ..powerlaw_coeffs import ALPHAS
-    from ..stats import mdev, oadev
-    from ..stats.powerlaw import decompose
-    from ..synth import ALPHA_NAMES
-
-    series = _load(args)
-    curves = [oadev(series, taus=args.taus, max_af=args.max_af),
-              mdev(series, taus=args.taus, max_af=args.max_af)]
-    fit = decompose(curves, f_h=args.fh, weights=args.weights)
-
-    if args.json:
-        print(json.dumps({
-            "h": {str(a): fit.h[a] for a in ALPHAS},
-            "drift_per_s": fit.drift,
-            "dominant": fit.dominant,
-            "f_h": fit.f_h,
-            "assumed_fh": fit.assumed_fh,
-            "weights": fit.weights,
-            "n_rows": fit.n_rows,
-            "dropped_rows": fit.dropped_rows,
-            "residual": fit.residual,
-            "kkt": fit.kkt,
-            "provenance": to_dict(fit.provenance),
-        }, indent=2, default=str))
-        return 0
-
-    print(f"# power-law decomposition of {args.path}")
-    print(f"# {fit.n_rows} rows from oadev + mdev, {fit.dropped_rows} dropped "
-          f"outside 2*pi*f_h*tau >= 10; weights={fit.weights}")
-    if fit.assumed_fh:
-        print(f"# WARNING: f_h assumed = {fit.f_h:.6g} Hz (Nyquist). It is not "
-              "identifiable from the data. The white-PM and flicker-PM levels")
-        print("#          below scale with it and must not be quoted without it.")
-    else:
-        print(f"# f_h = {fit.f_h:.6g} Hz, as given")
-    print(f"\n{'alpha':>6}  {'noise type':<16}  {'h_alpha':>14}")
-    for a in ALPHAS:
-        print(f"{a:>+6}  {ALPHA_NAMES[a]:<16}  {fit.h[a]:>14.6e}")
-    print(f"{'':>6}  {'linear drift':<16}  {fit.drift:>14.6e}  per second")
-    dominant = ("none resolved" if fit.dominant is None
-                else f"{fit.dominant:+d} ({ALPHA_NAMES[fit.dominant]})")
-    print(f"\n# dominant at the shortest fitted tau: {dominant}")
-    print(f"# residual {fit.residual:.4e}, KKT optimality {fit.kkt:.2e}")
-    return 0
 
 
-def _parse_freeze(items) -> dict:
-    """`NAME=VALUE` pairs from the command line into a dict."""
-    out = {}
-    for item in items:
-        name, sep, value = item.partition("=")
-        if not sep:
-            raise ValueError(f"--freeze wants NAME=VALUE, got {item!r}")
-        try:
-            out[name.strip()] = float(value)
-        except ValueError:
-            raise ValueError(
-                f"--freeze {item!r}: {value!r} is not a number") from None
-    return out
 
 
-def _cmd_fit(args) -> int:
-    """Fit a model to a measured curve, honouring the chi-square sampling law.
-
-    **Prints the parameters only when they are fit to quote.** If the
-    optimizer did not converge, or the deviance is outside what its
-    effective degrees of freedom admit, the deviance and the reason are
-    printed instead. A parameter from a model that does not describe the
-    data is worse than no parameter, because it looks like a measurement.
-
-    Two standard errors are shown for each parameter: the one that counts
-    the correlation between taus, and the one that ignores it. Their ratio
-    is what the correlation was costing.
-    """
-    from ..fitting import fit as run_fit
-    from ..registry import get as registry_get
-
-    series = _load(args)
-    curve = registry_get("estimator", args.estimator)(
-        series, taus=args.taus, max_af=args.max_af)
-    result = run_fit(
-        curve, args.model, freeze=_parse_freeze(args.freeze),
-        objective=args.objective, level=args.level,
-        bootstrap=args.bootstrap, seed=args.seed,
-    )
-
-    if args.json:
-        print(json.dumps({
-            "model": result.model,
-            "ok": result.ok,
-            "params": result.params,
-            "free": list(result.free),
-            "frozen": result.frozen,
-            "stderr": result.stderr,
-            "stderr_uncorrelated": result.stderr_naive,
-            "understatement": result.understatement,
-            "interval": {k: list(v) for k, v in result.interval.items()},
-            "bootstrap": {k: list(v) for k, v in result.bootstrap.items()},
-            "n_bootstrap": result.n_bootstrap,
-            "n_bootstrap_failed": result.n_bootstrap_failed,
-            "level": result.level,
-            "objective": result.objective,
-            "correlation": result.correlation,
-            "correlation_note": result.correlation_note,
-            "deviance": result.gof.deviance,
-            "dof_effective": result.gof.dof,
-            "deviance_scale": result.gof.scale,
-            "p_value": result.gof.p_value,
-            "gof_ok": result.gof.ok,
-            "gof_note": result.gof.note,
-            "converged": result.converged,
-            "reason": result.reason,
-            "tau_s": result.tau_s.tolist(),
-            "measured": result.measured.tolist(),
-            "fitted": result.fitted.tolist(),
-            "edof": result.edof.tolist(),
-            "provenance": to_dict(result.provenance),
-        }, indent=2, default=str))
-        return 0 if result.ok else 1
-
-    print(f"# fit of {result.model!r} to {args.estimator} of {args.path}")
-    print(f"# objective={result.objective}, {result.tau_s.size} taus, "
-          f"deviance {result.gof.deviance:.4g} on {result.gof.dof:.1f} "
-          f"effective dof, p = {result.gof.p_value:.3g}")
-    if result.correlation == "isserlis":
-        print("# cross-tau correlation measured from the coefficients")
-    else:
-        print(f"# WARNING: the taus were treated as independent "
-              f"({result.correlation_note})")
-        print("#          so every uncertainty below is a lower bound.")
-
-    if not result.ok:
-        print("\n# REFUSING TO PRINT PARAMETERS")
-        if not result.converged:
-            print(f"#   the optimizer did not converge: {result.reason}")
-        if not result.gof.ok:
-            print(f"#   {result.gof.note}")
-        print("# The fitted values exist on the result object; they are "
-              "withheld here")
-        print("# because a number from a model that does not describe the "
-              "data reads")
-        print("# like a measurement and is not one.")
-        return 1
-
-    pct = 100.0 * result.level
-    print(f"\n{'parameter':<22}{'value':>14}{'std err':>13}"
-          f"{'uncorrelated':>14}{'ratio':>8}")
-    for name in result.free:
-        print(f"{name:<22}{result.params[name]:>14.6e}"
-              f"{result.stderr[name]:>13.3e}{result.stderr_naive[name]:>14.3e}"
-              f"{result.understatement[name]:>8.2f}")
-    for name, value in result.frozen.items():
-        print(f"{name:<22}{value:>14.6e}{'frozen':>13}")
-
-    print(f"\n# {pct:.1f}% intervals")
-    for name in result.free:
-        lo, hi = result.interval[name]
-        line = f"#   {name:<20}[{lo:.6e}, {hi:.6e}]"
-        if name in result.bootstrap:
-            b_lo, b_hi = result.bootstrap[name]
-            line += f"   bootstrap [{b_lo:.6e}, {b_hi:.6e}]"
-        print(line)
-    if result.n_bootstrap:
-        print(f"# {result.n_bootstrap} bootstrap refits"
-              + (f", {result.n_bootstrap_failed} dropped as unconverged"
-                 if result.n_bootstrap_failed else ""))
-    if result.gof.note:
-        print(f"# {result.gof.note}")
-    return 0
 
 
 def _cmd_cross(args) -> int:
