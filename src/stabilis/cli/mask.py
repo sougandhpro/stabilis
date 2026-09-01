@@ -14,7 +14,7 @@ from ..provenance import to_dict
 from ..stats import ONE_SIGMA
 from ..stats.edof import EDOF_METHODS
 from ..tau import MODES
-from .common import (NO_INTERVAL, _add_input_args, _confidence_for, _load)
+from .common import NO_INTERVAL, _add_input_args, _confidence_for, _load
 
 __all__ = ["add_mask"]
 
