@@ -45,7 +45,7 @@ import numpy as np
 
 from ..log import record, warn
 from ..provenance import Provenance
-from .core import StabilityResult
+from .core import StabilityResult, require_ordered_coeffs
 from .edof import DEFAULT_LAG_LIMIT, MIN_TERMS_FOR_ETA1, edof
 
 __all__ = ["TauCovariance", "tau_covariance", "TAUCOV_METHODS"]
@@ -152,6 +152,7 @@ def _isserlis_matrix(coeffs, afs, scale: float, lag_limit: int) -> np.ndarray:
 
 def _can_measure(result: StabilityResult) -> str:
     """Empty if the Isserlis route applies, else why it does not."""
+    require_ordered_coeffs(result, "the cross-tau covariance")
     if not result.coeffs:
         return "the estimator was called with keep_coeffs=False"
     if len(result.coeffs) != result.af.size:

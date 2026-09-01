@@ -17,15 +17,15 @@ from ..stats.core import GAP_POLICIES
 from ..stats.edof import EDOF_METHODS
 from ..stats.greenhall import GREENHALL_RUN_POLICIES
 from ..tau import MODES
-from .common import (NO_INTERVAL, _add_input_args, _confidence_for, _load,
-                     _summary)
+from .common import (NO_INTERVAL, NO_KEEP_COEFFS, _add_input_args,
+                     _confidence_for, _load, _summary)
 
 __all__ = ["add_estimators", "add_wdev"]
 
 
 def add_estimators(sub) -> None:
-    from ..stats import (adev, mdev, mtie, oadev, ohdev, tdev, theo1, theobr,
-                    theoh, tierms, totdev)
+    from ..stats import (adev, htotdev, mdev, mtie, mtotdev, oadev, ohdev,
+                    tdev, theo1, theobr, theoh, tierms, totdev, ttotdev)
 
     for name, fn in (
         ("adev", adev),
@@ -34,6 +34,9 @@ def add_estimators(sub) -> None:
         ("tdev", tdev),
         ("ohdev", ohdev),
         ("totdev", totdev),
+        ("mtotdev", mtotdev),
+        ("ttotdev", ttotdev),
+        ("htotdev", htotdev),
         ("theo1", theo1),
         ("theobr", theobr),
         ("theoh", theoh),
@@ -150,7 +153,7 @@ def _cmd_estimate(args) -> int:
     """
     series = _load(args)
     want_ci = not args.no_confidence
-    extra = {} if args.estimator_name in NO_INTERVAL else {
+    extra = {} if args.estimator_name in NO_KEEP_COEFFS else {
         "keep_coeffs": want_ci}
     result = args.estimator(
         series,

@@ -11,6 +11,7 @@ from .theo1 import theo1
 from .theoh import theobr, theoh
 from .wavelet import wavelet_variance, wdev
 from .total import totdev, totvar_extend
+from .mtotal import htotdev, mtotdev, total_subsequence_terms, ttotdev
 from .noiseid import NoiseID, identify, identify_curve
 from .powerlaw import PowerLawFit, decompose
 from .psd import Spectrum, script_l, welch
@@ -28,6 +29,10 @@ __all__ = [
     "mtie",
     "tierms",
     "totdev",
+    "mtotdev",
+    "ttotdev",
+    "htotdev",
+    "total_subsequence_terms",
     "theo1",
     "theobr",
     "theoh",

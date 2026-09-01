@@ -33,7 +33,7 @@ import numpy as np
 from .._specfun import chi2_ppf
 from ..log import record, warn
 from ..provenance import Provenance
-from .core import StabilityResult
+from .core import StabilityResult, require_ordered_coeffs
 from .edof import EDOF_METHODS, edof
 from .greenhall import GREENHALL_RUN_POLICIES, greenhall_edof_pooled
 from .edof import eta3, totvar_edof
@@ -239,6 +239,7 @@ def confidence(
             f"{result.kind}: confidence needs the coefficient arrays; "
             "the estimator was called with keep_coeffs=False"
         )
+    require_ordered_coeffs(result, "the confidence interval")
 
     alphas = None
     if method == "totvar":

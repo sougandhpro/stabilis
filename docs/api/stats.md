@@ -9,7 +9,7 @@ The variance family, confidence intervals, noise identification, power spectra a
 
 - **`stabilis.stats`** -- Stability estimators.
 - **`stabilis.stats.bias`** -- Bias in the reported deviation, and how to remove it.
-  <br>`deviation_bias_factor`, `unbias_deviation`, `TOTVAR_BIAS_A`, `totvar_bias`, `THEO1_BIAS_PARAMS`, `theo1_bias`, `THEO1_BIAS_MEASURED`
+  <br>`deviation_bias_factor`, `unbias_deviation`, `TOTVAR_BIAS_A`, `totvar_bias`, `THEO1_BIAS_PARAMS`, `theo1_bias`, `THEO1_BIAS_MEASURED`, `MTOT_BIAS_PUBLISHED`, `MTOT_BIAS_MEASURED`, `HTOT_BIAS_MEASURED`, `mtot_bias`, `htot_bias`
 - **`stabilis.stats.ci`** -- Confidence intervals on a stability estimate.
   <br>`ONE_SIGMA`, `TWO_SIGMA`, `chi2_interval`, `Confidence`, `confidence`
 - **`stabilis.stats.classical`** -- The classical variance family, computed directly from phase.
@@ -24,6 +24,8 @@ The variance family, confidence intervals, noise identification, power spectra a
   <br>`lagged_covariance`, `isserlis_var`
 - **`stabilis.stats.mtie`** -- MTIE and TIE rms -- the two telecom statistics that are not variances.
   <br>`running_extremes`, `mtie`, `tierms`
+- **`stabilis.stats.mtotal`** -- MTOT, TTOT and HTOT: the total variances built on 3m subsequences.
+  <br>`total_subsequence_terms`, `mtotdev`, `ttotdev`, `htotdev`
 - **`stabilis.stats.noiseid`** -- Power-law noise identification, by two independent routes.
   <br>`ALPHA_NAMES`, `NoiseID`, `lag1_alpha`, `mdev_slope_alpha`, `identify`, `identify_curve`
 - **`stabilis.stats.powerlaw`** -- Power-law decomposition: measured sigma(tau) curves into `h_alpha`.
@@ -51,7 +53,7 @@ The variance family, confidence intervals, noise identification, power spectra a
 
 Stability estimators.
 
-Re-exports: `Shape`, `StabilityResult`, `adev`, `oadev`, `mdev`, `tdev`, `ohdev`, `mtie`, `tierms`, `totdev`, `theo1`, `theobr`, `theoh`, `wdev`, `wavelet_variance`, `Confidence`, `confidence`, `ONE_SIGMA`, `TWO_SIGMA`, `edof`, `eta1`, `eta3`, `greenhall_edof`, `greenhall_edof_pooled`, `NoiseID`, `identify`, `identify_curve`, `deviation_bias_factor`, `unbias_deviation`, `PowerLawFit`, `decompose`, `Spectrum`, `welch`, `script_l`, `Spur`, `SpurTable`, `detect_spurs`, `notch_spurs`, `sinusoid_dev`, `TauCovariance`, `tau_covariance`.
+Re-exports: `Shape`, `StabilityResult`, `adev`, `oadev`, `mdev`, `tdev`, `ohdev`, `mtie`, `tierms`, `totdev`, `mtotdev`, `ttotdev`, `htotdev`, `total_subsequence_terms`, `theo1`, `theobr`, `theoh`, `wdev`, `wavelet_variance`, `Confidence`, `confidence`, `ONE_SIGMA`, `TWO_SIGMA`, `edof`, `eta1`, `eta3`, `greenhall_edof`, `greenhall_edof_pooled`, `NoiseID`, `identify`, `identify_curve`, `deviation_bias_factor`, `unbias_deviation`, `PowerLawFit`, `decompose`, `Spectrum`, `welch`, `script_l`, `Spur`, `SpurTable`, `detect_spurs`, `notch_spurs`, `sinusoid_dev`, `TauCovariance`, `tau_covariance`.
 
 ---
 
@@ -188,6 +190,62 @@ THEO1_BIAS_MEASURED = {0: 1.0, -1: 0.55, -2: 0.37}
 ```
 
 Thêo1's bias against AVAR, at the same tau, for m >~ 100.  **Measured here, not published.** 60 realizations at N=8192 of each power law, Thêo1 against an interpolated overlapping AVAR at Thêo1's own tau. White FM comes out at 1.00, which is the property that identified the missing 0.75 in SP 1065 eq. (30) -- see stats/theo1.py. The FM biases are real and are what Howe's TheoBR exists to remove by averaging Thêo1 against AVAR over the range where both are defined.  TheoBR is not implemented, so these are here to be *reported*, not silently applied: a number divided by a ratio measured on synthetic noise is not the same thing as a number corrected by a published estimator.
+
+#### `MTOT_BIAS_PUBLISHED`
+
+```python
+MTOT_BIAS_PUBLISHED = {2: 1.06, 1: 1.17, 0: 1.27, -1: 1.3, -2: 1.31}
+```
+
+SP 1065 Table 11, transcribed. Its caption reads "the ratio of the expected value of Mod Totvar to MVAR", and section 5.12 says "this bias factor should be used to correct all reported MTOT results".  **The caption's direction is inverted relative to its own values.** Measured here, MTOT is biased *low* against MVAR for every noise type but white PM, so E[MTOT]/MVAR runs 0.68 to 1.00 and it is the reciprocal that lands on this table. Read as a multiplier -- MTOT times this is an estimate of MVAR -- the values are what "correct all reported MTOT results" has to mean, and that is how `mtot_bias` returns it.
+
+#### `MTOT_BIAS_MEASURED`
+
+```python
+MTOT_BIAS_MEASURED = {2: 1.004, 1: 1.171, 0: 1.295, -1: 1.393, -2: 1.473}
+```
+
+The same ratio measured here: 400 realizations at N = 2048, ensemble mean of MVAR over ensemble mean of MTOT, at m = 8, 16, 32, 64. Flat in m over that range and flat in N from 256 to 4096, which is SP 1065's own claim that the factor is "essentially independent of the averaging factor and number of data points".  **Flicker PM agrees exactly and white FM to 2%; white PM, flicker FM and random-walk FM disagree by 5%, 7% and 12%.** The estimator is not in doubt -- `allantools.mtotdev` returns our numbers to every printed digit, which is two independent readings of eq. (27) agreeing. What is in doubt is whether Stable32 computes eq. (27) or something slightly different, and only the Stable32 session settles that. Recorded, not reconciled: see theory/mtotal.md and VALIDATION-DEBT.
+
+#### `HTOT_BIAS_MEASURED`
+
+```python
+HTOT_BIAS_MEASURED = {2: 0.728, 1: 0.808, 0: 1.004, -1: 1.171, -2: 1.295}
+```
+
+HTOT's equivalent, measured the same way. **SP 1065 publishes no table** -- section 5.2.14 says only that "a bias correction is required that is dependent on the power law noise type and number of samples" and points at Howe et al., IEEE T-UFFC 52:1253 (2005), which is not in hand.  The three FM rows are the MTOT table shifted by two in alpha, to five significant figures, and that is not a coincidence: HTOT applies to the frequency record the operator MTOT applies to the phase, and S_x = S_y/(2 pi f)**2, so a y-noise of exponent alpha presents to it as an x-noise of alpha + 2. The two PM rows continue the sequence to alpha = 3 and 4, which the modified family has no counterpart for; they are also the two that still drift with m (white PM runs 0.741 to 0.723 over m = 8..64), so they are given at m = 32 and should be read as indicative.
+
+#### `mtot_bias`
+
+```python
+mtot_bias(alpha: int, published: bool=True) -> float
+```
+
+Multiplier turning MTOT into an estimate of MVAR, SP 1065 Table 11.
+
+    corrected = mtot * mtot_bias(alpha)
+
+`published=False` returns the value measured here instead. The two
+differ by up to 12%, and which one is right depends on a question this
+repository cannot answer without a Stable32 run -- so both are
+available, both are labelled, and neither is applied automatically.
+Returned as a factor rather than applied, like every other correction
+in this module.
+
+#### `htot_bias`
+
+```python
+htot_bias(alpha: int) -> float
+```
+
+Multiplier turning HTOT into an estimate of HVAR. **Measured here.**
+
+There is no published table to offer: SP 1065 states that a correction
+is needed and refers to a paper this repository does not have. So
+unlike `mtot_bias` there is no `published=` switch, and the docstring
+is the whole disclosure -- a number measured on synthetic noise is not
+the same kind of thing as a number from a reference, and a caller
+quoting it in a report needs to know which they have.
 
 ---
 
@@ -456,6 +514,7 @@ shape: Shape | None = None
 run_lengths: tuple[int, ...] = ()
 run_terms: tuple[np.ndarray, ...] = ()
 dropped_terms: tuple[int, ...] = ()
+coeffs_are_ordered: bool = True
 is_variance: bool = True
 ```
 
@@ -985,6 +1044,88 @@ running fast by a fixed amount contributes `offset * tau` and comes to
 dominate at long tau. That is a property of the definition, not a
 defect, and it is why the number is used for timing distribution
 specifications where the offset is exactly what matters.
+
+---
+
+## `stabilis.stats.mtotal`
+
+MTOT, TTOT and HTOT: the total variances built on 3m subsequences.
+
+NIST SP 1065 sections 5.2.12-5.2.14, eq. (27), (28) and (29), read from the
+digital original. TOTVAR (`total.py`) extends the *whole record* once by
+reflection; this family instead takes every 3m-point subsequence, removes
+its own linear trend, extends *that* by reflection to 9m points, and
+averages the resulting variance over all N-3m+1 subsequences.
+
+    subsequence   s = a[n : n+3m]                     3m points
+    detrend       s0 = s - c*i,  c from the half-means
+    extend        s# = [s0 reversed, s0, s0 reversed]  9m points
+    average       abar[j] = mean(s#[j : j+m])
+    difference    z[i] = abar[i] - 2 abar[i+m] + abar[i+2m],  i = 0 .. 6m-1
+
+with `a` the phase for MTOT and TTOT and the fractional frequency for HTOT.
+At the largest averaging factor `m = N/3` the outer sum has one term left
+but the inner one still has 6m, which is the whole point: the estimate does
+not collapse at long tau the way the Allan family's does.
+
+**The reflection here is uninverted**, unlike TOTVAR's. SP 1065 writes it
+`0x#_{n-l} = 0x_{n+l-1}`, a plain half-point mirror that duplicates the
+edge sample. TOTVAR's `2x_1 - x` continues the trend across the boundary
+instead; it can, because it has not removed one. Here the trend has already
+been taken out of the subsequence, so a mirror does not manufacture a
+corner and the inversion would be doing the job twice.
+
+**Cross-checked against a second implementation.** `allantools.mtotdev` and
+`allantools.htotdev` return these numbers to every printed digit on the
+same records. That is two independent readings of the same published
+algorithm agreeing, which is the only interop evidence available: no
+Stable32 fixture for this family exists in the repository. See
+`theory/mtotal.md` for what that does and does not establish, and for the
+disagreement with SP 1065's own Table 11 that it exposes.
+
+#### `total_subsequence_terms`
+
+```python
+total_subsequence_terms(a: np.ndarray, m: int) -> np.ndarray
+```
+
+The `(N-3m+1, 6m)` array of second differences, SP 1065 Fig. 10.
+
+Public because it is the whole algorithm, and being able to look at one
+subsequence's extension directly is worth more than any description of
+it. Rows are subsequences, columns the 6m fully overlapping second
+differences of m-point averages within one extended subsequence.
+
+The detrend divides the difference of the half-means by the distance
+between their centroids, which is `3m - floor(3m/2)`. SP 1065 says
+"dividing by half the interval", exact when `3m` is even; when `m` is
+odd the two halves cannot both be `1.5m` long, and the centroid
+distance is what "half the interval" means in the case the text does
+not distinguish.
+
+#### `mtotdev`
+
+```python
+mtotdev(series: PhaseSeries | FreqSeries, taus: str='octave', max_af: int | None=None, keep_coeffs: bool=True, gap_policy: str='auto') -> StabilityResult
+```
+
+Modified total deviation. See theory/mtotal.md.
+
+#### `ttotdev`
+
+```python
+ttotdev(series: PhaseSeries | FreqSeries, taus: str='octave', max_af: int | None=None, keep_coeffs: bool=True, gap_policy: str='auto') -> StabilityResult
+```
+
+Time total deviation, in seconds. See theory/mtotal.md.
+
+#### `htotdev`
+
+```python
+htotdev(series: PhaseSeries | FreqSeries, taus: str='octave', max_af: int | None=None, keep_coeffs: bool=True, gap_policy: str='auto') -> StabilityResult
+```
+
+Hadamard total deviation. See theory/mtotal.md.
 
 ---
 

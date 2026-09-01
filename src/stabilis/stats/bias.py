@@ -39,6 +39,11 @@ import math
 import numpy as np
 
 __all__ = [
+    "MTOT_BIAS_PUBLISHED",
+    "MTOT_BIAS_MEASURED",
+    "HTOT_BIAS_MEASURED",
+    "mtot_bias",
+    "htot_bias",
     "THEO1_BIAS_MEASURED",
     "THEO1_BIAS_PARAMS",
     "theo1_bias",
@@ -188,3 +193,82 @@ def theo1_bias(alpha: int, m):
 # silently applied: a number divided by a ratio measured on synthetic noise
 # is not the same thing as a number corrected by a published estimator.
 THEO1_BIAS_MEASURED = {0: 1.00, -1: 0.55, -2: 0.37}
+
+# SP 1065 Table 11, transcribed. Its caption reads "the ratio of the
+# expected value of Mod Totvar to MVAR", and section 5.12 says "this bias
+# factor should be used to correct all reported MTOT results".
+#
+# **The caption's direction is inverted relative to its own values.**
+# Measured here, MTOT is biased *low* against MVAR for every noise type but
+# white PM, so E[MTOT]/MVAR runs 0.68 to 1.00 and it is the reciprocal that
+# lands on this table. Read as a multiplier -- MTOT times this is an
+# estimate of MVAR -- the values are what "correct all reported MTOT
+# results" has to mean, and that is how `mtot_bias` returns it.
+MTOT_BIAS_PUBLISHED = {2: 1.06, 1: 1.17, 0: 1.27, -1: 1.30, -2: 1.31}
+
+# The same ratio measured here: 400 realizations at N = 2048, ensemble mean
+# of MVAR over ensemble mean of MTOT, at m = 8, 16, 32, 64. Flat in m over
+# that range and flat in N from 256 to 4096, which is SP 1065's own claim
+# that the factor is "essentially independent of the averaging factor and
+# number of data points".
+#
+# **Flicker PM agrees exactly and white FM to 2%; white PM, flicker FM and
+# random-walk FM disagree by 5%, 7% and 12%.** The estimator is not in
+# doubt -- `allantools.mtotdev` returns our numbers to every printed digit,
+# which is two independent readings of eq. (27) agreeing. What is in doubt
+# is whether Stable32 computes eq. (27) or something slightly different,
+# and only the Stable32 session settles that. Recorded, not reconciled:
+# see theory/mtotal.md and VALIDATION-DEBT.
+MTOT_BIAS_MEASURED = {2: 1.004, 1: 1.171, 0: 1.295, -1: 1.393, -2: 1.473}
+
+# HTOT's equivalent, measured the same way. **SP 1065 publishes no table**
+# -- section 5.2.14 says only that "a bias correction is required that is
+# dependent on the power law noise type and number of samples" and points
+# at Howe et al., IEEE T-UFFC 52:1253 (2005), which is not in hand.
+#
+# The three FM rows are the MTOT table shifted by two in alpha, to five
+# significant figures, and that is not a coincidence: HTOT applies to the
+# frequency record the operator MTOT applies to the phase, and
+# S_x = S_y/(2 pi f)**2, so a y-noise of exponent alpha presents to it as
+# an x-noise of alpha + 2. The two PM rows continue the sequence to alpha
+# = 3 and 4, which the modified family has no counterpart for; they are
+# also the two that still drift with m (white PM runs 0.741 to 0.723 over
+# m = 8..64), so they are given at m = 32 and should be read as indicative.
+HTOT_BIAS_MEASURED = {2: 0.728, 1: 0.808, 0: 1.004, -1: 1.171, -2: 1.295}
+
+
+def mtot_bias(alpha: int, published: bool = True) -> float:
+    """Multiplier turning MTOT into an estimate of MVAR, SP 1065 Table 11.
+
+        corrected = mtot * mtot_bias(alpha)
+
+    `published=False` returns the value measured here instead. The two
+    differ by up to 12%, and which one is right depends on a question this
+    repository cannot answer without a Stable32 run -- so both are
+    available, both are labelled, and neither is applied automatically.
+    Returned as a factor rather than applied, like every other correction
+    in this module.
+    """
+    table = MTOT_BIAS_PUBLISHED if published else MTOT_BIAS_MEASURED
+    if alpha not in table:
+        raise ValueError(
+            f"mtot_bias: no {'published' if published else 'measured'} "
+            f"factor for alpha={alpha}; have {sorted(table)}")
+    return table[alpha]
+
+
+def htot_bias(alpha: int) -> float:
+    """Multiplier turning HTOT into an estimate of HVAR. **Measured here.**
+
+    There is no published table to offer: SP 1065 states that a correction
+    is needed and refers to a paper this repository does not have. So
+    unlike `mtot_bias` there is no `published=` switch, and the docstring
+    is the whole disclosure -- a number measured on synthetic noise is not
+    the same kind of thing as a number from a reference, and a caller
+    quoting it in a report needs to know which they have.
+    """
+    if alpha not in HTOT_BIAS_MEASURED:
+        raise ValueError(
+            f"htot_bias: measured for alpha in "
+            f"{sorted(HTOT_BIAS_MEASURED)}, not {alpha}")
+    return HTOT_BIAS_MEASURED[alpha]

@@ -20,6 +20,9 @@ The library API is documented separately, in [api/index.md](api/index.md).
 | [`stabilis tdev`](#stabilis-tdev) | Time deviation, in seconds. See theory/tdev.md. |
 | [`stabilis ohdev`](#stabilis-ohdev) | Overlapping Hadamard deviation. See theory/hvar.md. |
 | [`stabilis totdev`](#stabilis-totdev) | Total deviation: TOTDEV, the square root of TOTVAR. |
+| [`stabilis mtotdev`](#stabilis-mtotdev) | Modified total deviation. See theory/mtotal.md. |
+| [`stabilis ttotdev`](#stabilis-ttotdev) | Time total deviation, in seconds. See theory/mtotal.md. |
+| [`stabilis htotdev`](#stabilis-htotdev) | Hadamard total deviation. See theory/mtotal.md. |
 | [`stabilis theo1`](#stabilis-theo1) | Thêo1 deviation, out to 75 % of the record length. |
 | [`stabilis theobr`](#stabilis-theobr) | Bias-removed Thêo1, SP 1065 eq. (33). |
 | [`stabilis theoh`](#stabilis-theoh) | ThêoH, SP 1065 eq. (34): AVAR at short tau, ThêoBR beyond it. |
@@ -54,13 +57,13 @@ The library API is documented separately, in [api/index.md](api/index.md).
 
 ```
 usage: stabilis [-h] [--version] [--log-level {debug,info,warning,error}]
-                {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
+                {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,mtotdev,ttotdev,htotdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
                 ...
 
 Frequency stability analysis.
 
 positional arguments:
-  {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
+  {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,mtotdev,ttotdev,htotdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
     docs                read the theory pages
     validate            run the validation evidence report
     stats               basic statistics for a data file
@@ -72,6 +75,9 @@ positional arguments:
     tdev                Time deviation, in seconds. See theory/tdev.md.
     ohdev               Overlapping Hadamard deviation. See theory/hvar.md.
     totdev              Total deviation: TOTDEV, the square root of TOTVAR.
+    mtotdev             Modified total deviation. See theory/mtotal.md.
+    ttotdev             Time total deviation, in seconds. See theory/mtotal.md.
+    htotdev             Hadamard total deviation. See theory/mtotal.md.
     theo1               Thêo1 deviation, out to 75 % of the record length.
     theobr              Bias-removed Thêo1, SP 1065 eq. (33).
     theoh               ThêoH, SP 1065 eq. (34): AVAR at short tau, ThêoBR beyond it.
@@ -518,6 +524,114 @@ options:
                         declines to them (default: pool)
   --no-confidence       skip the bounds; also frees the coefficient arrays, which
                         matter on a record of millions of points
+  --json                emit JSON
+```
+
+## `stabilis mtotdev`
+
+Modified total deviation. see theory/mtotal.md..
+
+```
+usage: stabilis mtotdev [-h] [--kind {phase,frequency}] [--rate RATE]
+                        [--column COLUMN] [--time-column TIME_COLUMN]
+                        [--delimiter DELIMITER] [--gap-value GAP_VALUE]
+                        [--taus {all,octave,decade,log}] [--max-af MAX_AF]
+                        [--gap-policy {auto,mask,segment}] [--json]
+                        path
+
+positional arguments:
+  path                  input data file
+
+options:
+  -h, --help            show this help message and exit
+  --kind {phase,frequency}
+                        whether the column holds phase in seconds or fractional
+                        frequency
+  --rate RATE           sample rate in Hz
+  --column COLUMN       data column, 0-based
+  --time-column TIME_COLUMN
+                        timetag column, to infer --rate
+  --delimiter DELIMITER
+                        override delimiter sniffing
+  --gap-value GAP_VALUE
+                        value marking a gap (Stable32 writes 0; not assumed)
+  --taus {all,octave,decade,log}
+                        tau grid
+  --max-af MAX_AF       largest averaging factor
+  --gap-policy {auto,mask,segment}
+                        how a gap affects nearby terms; see `stabilis docs gaps`
+  --json                emit JSON
+```
+
+## `stabilis ttotdev`
+
+Time total deviation, in seconds. see theory/mtotal.md..
+
+```
+usage: stabilis ttotdev [-h] [--kind {phase,frequency}] [--rate RATE]
+                        [--column COLUMN] [--time-column TIME_COLUMN]
+                        [--delimiter DELIMITER] [--gap-value GAP_VALUE]
+                        [--taus {all,octave,decade,log}] [--max-af MAX_AF]
+                        [--gap-policy {auto,mask,segment}] [--json]
+                        path
+
+positional arguments:
+  path                  input data file
+
+options:
+  -h, --help            show this help message and exit
+  --kind {phase,frequency}
+                        whether the column holds phase in seconds or fractional
+                        frequency
+  --rate RATE           sample rate in Hz
+  --column COLUMN       data column, 0-based
+  --time-column TIME_COLUMN
+                        timetag column, to infer --rate
+  --delimiter DELIMITER
+                        override delimiter sniffing
+  --gap-value GAP_VALUE
+                        value marking a gap (Stable32 writes 0; not assumed)
+  --taus {all,octave,decade,log}
+                        tau grid
+  --max-af MAX_AF       largest averaging factor
+  --gap-policy {auto,mask,segment}
+                        how a gap affects nearby terms; see `stabilis docs gaps`
+  --json                emit JSON
+```
+
+## `stabilis htotdev`
+
+Hadamard total deviation. see theory/mtotal.md..
+
+```
+usage: stabilis htotdev [-h] [--kind {phase,frequency}] [--rate RATE]
+                        [--column COLUMN] [--time-column TIME_COLUMN]
+                        [--delimiter DELIMITER] [--gap-value GAP_VALUE]
+                        [--taus {all,octave,decade,log}] [--max-af MAX_AF]
+                        [--gap-policy {auto,mask,segment}] [--json]
+                        path
+
+positional arguments:
+  path                  input data file
+
+options:
+  -h, --help            show this help message and exit
+  --kind {phase,frequency}
+                        whether the column holds phase in seconds or fractional
+                        frequency
+  --rate RATE           sample rate in Hz
+  --column COLUMN       data column, 0-based
+  --time-column TIME_COLUMN
+                        timetag column, to infer --rate
+  --delimiter DELIMITER
+                        override delimiter sniffing
+  --gap-value GAP_VALUE
+                        value marking a gap (Stable32 writes 0; not assumed)
+  --taus {all,octave,decade,log}
+                        tau grid
+  --max-af MAX_AF       largest averaging factor
+  --gap-policy {auto,mask,segment}
+                        how a gap affects nearby terms; see `stabilis docs gaps`
   --json                emit JSON
 ```
 

@@ -45,7 +45,7 @@ from ..powerlaw_coeffs import (
     mvar_coeff,
 )
 from ..provenance import Provenance, new_provenance
-from .core import StabilityResult
+from .core import StabilityResult, require_ordered_coeffs
 from .edof import edof
 
 __all__ = ["PowerLawFit", "WEIGHT_METHODS", "REFUSED_KINDS", "decompose"]
@@ -242,6 +242,7 @@ def _row_sigma(result: StabilityResult, keep: np.ndarray) -> np.ndarray:
     """
     idx = np.flatnonzero(keep)
     var = np.abs(result.var[idx])
+    require_ordered_coeffs(result, "the fitted decomposition's weights")
     if not result.coeffs:
         return var
     etas = np.array([max(edof(result.coeffs[i], int(result.af[i]),

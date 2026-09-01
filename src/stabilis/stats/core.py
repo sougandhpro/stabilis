@@ -123,6 +123,16 @@ class StabilityResult:
     # in taucov.py needs the difference. Empty means "not recorded" -- a
     # result assembled by hand rather than by this driver.
     dropped_terms: tuple[int, ...] = ()
+    # Whether `coeffs` is one time-ordered sequence of the estimator's
+    # terms. True for every estimator whose terms slide along the record.
+    # False for the MTOT family, whose array is one block of 6m terms per
+    # 3m-point subsequence, each block drawn from a different subsequence
+    # and mostly from its reflection: consecutive entries across a block
+    # boundary are neither consecutive in time nor from the same data. The
+    # four consumers that read structure rather than magnitude out of the
+    # array -- eta1, taucov, the cross-variance and the decomposition --
+    # check this and refuse rather than returning a meaningless number.
+    coeffs_are_ordered: bool = True
     # Whether `var` really is a variance. False for MTIE and TIE rms, which
     # this container still carries -- they are sigma-tau curves and belong
     # on the same plot -- but which must not be fed to anything that
@@ -246,6 +256,28 @@ def phase_runs(
     if policy == "mask":
         return [series.x], policy
     return [series.x[a:b] for a, b in segments(series.x)], policy
+
+
+def require_ordered_coeffs(result: "StabilityResult", what: str) -> None:
+    """Refuse when the terms are not a time-ordered sequence.
+
+    Raised rather than silently falling back, because every fallback here
+    would also be wrong: `eta3` counts non-overlapping windows and the MTOT
+    family has `6m(N-3m+1)` terms drawn from `N/3m` independent stretches,
+    so it over-counts by three orders of magnitude at long tau. A number
+    that is wrong in the optimistic direction is worse than no number.
+    """
+    if not result.coeffs_are_ordered:
+        raise ValueError(
+            f"{result.kind}: {what} reads the structure of the coefficient "
+            "array, and this estimator's terms are not one time-ordered "
+            "sequence -- they are one block per 3m-point subsequence, mostly "
+            "drawn from that subsequence's reflection. The published "
+            "degrees of freedom for this family are in Riley, 'Confidence "
+            "Intervals and Bias Corrections for the Stable32 Variance "
+            "Functions', which is not implemented here; see "
+            "theory/mtotal.md. Use the point estimate without an interval, "
+            "or an estimator whose terms slide along the record.")
 
 
 def run_estimator(

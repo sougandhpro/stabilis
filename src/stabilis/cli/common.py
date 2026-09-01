@@ -18,19 +18,27 @@ import numpy as np
 from ..stats import confidence
 
 __all__ = [
-    "NO_INTERVAL", "_summary", "_add_input_args", "_load",
+    "NO_INTERVAL", "NO_KEEP_COEFFS", "_summary", "_add_input_args", "_load",
     "_confidence_for", "_nan_to_none",
 ]
 
-# Estimators with no confidence interval today, for two different reasons,
-# and offering the flags anyway would be worse than not having them. MTIE
-# and TIE rms are not variances at all, so the chi-square interval does not
-# apply and `confidence` refuses them. The Thêo family *is* a variance
-# family, but it reports no coefficient arrays for the data-driven path and
-# its own EDF (SP 1065 Table 9) is not implemented -- see theory/theoh.md.
-# None of them takes `keep_coeffs` either, which is why this one list drives
-# both decisions.
-NO_INTERVAL = ("mtie", "tierms", "theo1", "theobr", "theoh")
+# Estimators with no confidence interval today, for three different
+# reasons, and offering the flags anyway would be worse than not having
+# them. MTIE and TIE rms are not variances at all, so the chi-square
+# interval does not apply and `confidence` refuses them. The Thêo family
+# *is* a variance family, but it reports no coefficient arrays for the
+# data-driven path and its own EDF (SP 1065 Table 9) is not implemented --
+# see theory/theoh.md. The MTOT family reports coefficient arrays but they
+# are not one time-ordered sequence, so no coefficient-based EDOF applies
+# and `confidence` refuses them -- see theory/mtotal.md.
+NO_INTERVAL = ("mtie", "tierms", "theo1", "theobr", "theoh",
+               "mtotdev", "ttotdev", "htotdev")
+
+# The subset that does not accept `keep_coeffs` at all. The rest do, and
+# must be told *not* to keep them: the MTOT family's arrays are quadratic
+# in the record length, so retaining them for an interval that will not be
+# computed is the one place this CLI could run a machine out of memory.
+NO_KEEP_COEFFS = ("mtie", "tierms", "theo1", "theobr", "theoh")
 
 
 def _summary(fn) -> str:

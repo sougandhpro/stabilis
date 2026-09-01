@@ -172,7 +172,7 @@ either is stale, so a signature can never drift away from its description.
 ## Status
 
 **M0–M3, M5 and M6 complete, plus the measurement report, the fitting
-layer, the export layer, and most of M8.** 1491 tests; `stabilis validate` 41/41.
+layer, the export layer, and most of M8.** 1532 tests; `stabilis validate` 41/41.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -213,6 +213,14 @@ legitimately be quoted. Since then:
   0.15 s, where the naive form is O(N·m) per τ.
 - **TOTVAR** with its published bias correction, and **Thêo1 / ThêoBR /
   ThêoH** — extending the usable τ range to 75 % of the record.
+- **MTOT, TTOT and HTOT**, the total variances built on 3m subsequences,
+  which keep 6m terms at every τ instead of collapsing at the long end.
+  Cross-checked against a second implementation of the published equations
+  to machine precision. They report **no confidence interval**: their terms
+  are not one time-ordered sequence, so no coefficient-based EDOF applies,
+  and the conservative fallback would over-count by three orders of
+  magnitude in the optimistic direction. Refusing is the honest answer
+  until the published degrees of freedom are implemented.
 - **The MODWT wavelet family**, four filters, with confidence intervals.
   The Haar case returns the overlapping Allan variance *and* its error
   bar, which is a cross-check of two independent code paths rather than a
@@ -306,9 +314,10 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — M7's tail: MTOT/TTOT/HTOT. Instrument readers wait on paired
-vendor exports, and binding live sources to bench channels waits on a real
-appending file.
+**Next** — the Thêo family's confidence intervals, and the
+imputation-free gap-tolerant wavelet variance. Instrument readers wait on
+paired vendor exports, and binding live sources to bench channels waits on
+a real appending file.
 
 ## Gap filling
 

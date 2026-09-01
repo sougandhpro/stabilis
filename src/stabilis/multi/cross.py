@@ -82,6 +82,7 @@ import numpy as np
 from ..log import record, warn
 from ..provenance import Provenance
 from ..registry import get
+from ..stats.core import require_ordered_coeffs
 from ..stats.edof import DEFAULT_LAG_LIMIT, eta1, eta3
 from ..stats.isserlis import isserlis_var, lagged_covariance
 from .align import common_support, overlap
@@ -323,6 +324,8 @@ def _check_pairable(ra, rb, estimator: str) -> None:
             "deterministic offset; neither is a mean of squares, so "
             "replacing one square with a product means nothing."
         )
+    require_ordered_coeffs(ra, "the cross-variance")
+    require_ordered_coeffs(rb, "the cross-variance")
     if not ra.coeffs or not rb.coeffs:
         raise ValueError(
             f"{estimator!r} returned no coefficient arrays, so there is "

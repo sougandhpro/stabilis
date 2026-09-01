@@ -391,6 +391,57 @@ the record at all, so no form of this argument reaches it.
 
 ---
 
+## 12. The MTOT family has no interop check and no published EDF
+
+**Status: open, in two halves — one waiting on a Stable32 run, one on a
+paper.**
+
+`mtotdev`, `ttotdev` and `htotdev` (`stats/mtotal.py`, `theory/mtotal.md`)
+landed 2026-09-01. Two things are missing and both are named here rather
+than papered over.
+
+**No confidence interval at all.** These are the only estimators in the
+library whose coefficient array is not one time-ordered sequence — it is
+`N−3m+1` blocks of 6m terms, each block from a different subsequence and
+mostly from that subsequence's reflection. `eta1`'s autocorrelation is
+meaningless over it, and `eta3` would be worse than meaningless: it counts
+`6m(N−3m+1)` terms drawn from about `N/3m` independent stretches, so at
+long τ it over-counts by three orders of magnitude, in the optimistic
+direction. `StabilityResult.coeffs_are_ordered` makes the four consumers
+refuse. The published degrees of freedom are in W. J. Riley, "Confidence
+Intervals and Bias Corrections for the Stable32 Variance Functions," PTTI
+2003, which this repository does not have. **Discharges** by obtaining that
+paper and implementing its formulae, with the same Monte-Carlo coverage
+check every other EDOF path here carries.
+
+**The measured bias disagrees with SP 1065 Table 11 by up to 12 %.**
+Measured over 400 realizations at N = 2048, MVAR/MTOT is 1.004, 1.171,
+1.295, 1.393, 1.473 for α = 2…−2 against the table's 1.06, 1.17, 1.27,
+1.30, 1.31 — flicker PM exact, white FM within 2 %, the other three out by
+5 %, 7 % and 12 %. The table's caption is also inverted relative to its own
+values; that part is resolved and recorded in `theory/mtotal.md`.
+
+The estimator is not what is in doubt. `allantools.mtotdev`, `ttotdev` and
+`htotdev` return our numbers to every printed digit, which is two
+independent readings of eq. (27) agreeing. What is in doubt is whether
+Stable32 computes eq. (27) or something slightly different — a different
+half-length convention, a different reflection, a different inner range.
+**Discharges** with the Stable32 session already owed under item 1: one run
+of MTOT/TTOT/HTOT on the existing synthetic inputs settles it in an
+afternoon. Until then `bias.mtot_bias` defaults to the *published* table,
+so a report agrees with Stable32, and `published=False` gives the measured
+one.
+
+**HTOT's bias has no published table at all.** SP 1065 §5.2.14 says a
+correction is required and refers to Howe et al., *IEEE Trans. UFFC* **52**,
+1253 (2005), which is not in hand. `bias.HTOT_BIAS_MEASURED` is measured
+here and labelled as such. It is the MTOT table shifted by two in α to five
+significant figures, which is structurally expected — HTOT applies to the
+frequency record the operator MTOT applies to the phase — and that identity
+is asserted in the tests, so the measured table is not free-floating.
+
+---
+
 ## Not debt
 
 For the avoidance of doubt, these are *already* validated and are not
