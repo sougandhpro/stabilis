@@ -49,7 +49,8 @@ from ..reference import (
     nbs14_1000point_integers,
     nbs14_9point,
 )
-from ..stats import ONE_SIGMA, TWO_SIGMA, adev, confidence, mdev, oadev, ohdev, tdev
+from ..stats import (ONE_SIGMA, TWO_SIGMA, adev, confidence, mdev, oadev,
+                     ohdev, tdev, theo1)
 from ..stats.bias import deviation_bias_factor
 from ..stats.core import StabilityResult
 from ..stats.edof import eta1
@@ -633,6 +634,7 @@ def _coverage(trials: int) -> list[Check]:
     out.append(_h_alpha_round_trip(ensembles, trials))
     out.append(_wavelet_level_against_exact_expectation(trials))
     out.append(_imputer_against_the_published_criterion(trials))
+    out.append(_theo1_edf_coverage(trials))
     out.append(_decomposition_round_trip(trials))
     out.append(_bench_hat_round_trip())
     out.append(_cross_sees_under_the_instrument(trials))
@@ -1064,6 +1066,64 @@ def _h_alpha_round_trip(ensembles, trials: int) -> Check:
         f"({se:.0%} at {trials} trials), for m up to N/16.",
         f"worst deviation {worst:.1%} over three power laws",
         worst < bound,
+    )
+
+
+def _theo1_edf_coverage(trials: int) -> Check:
+    """SP 1065 Table 9, measured. A published table is worth its coverage.
+
+    The Thêo family had no confidence interval at all until this table was
+    implemented -- Thêo1 is a sum over a triangular set of lag pairs rather
+    than a mean of one coefficient per term, so there is no array for the
+    data-driven estimators to read an autocorrelation from, and Table 9 is
+    the only route. That makes it the one EDOF path here with no second
+    opinion, which is exactly why it gets measured rather than trusted.
+
+    **The band is asymmetric on purpose.** An interval that is too wide is
+    a defect of efficiency; one that is too narrow is a defect of
+    correctness, and only the second can make a conformity statement wrong.
+    Table 9 is a fitted approximation and it under-estimates the degrees of
+    freedom at the long-tau end, so the measured containment runs above
+    nominal there. That is allowed room; falling below is not.
+    """
+    trials = max(trials, MIN_COVERAGE_TRIALS)
+    worst_lo, worst_hi = 1.0, 0.0
+    for alpha in (2, 0, -2):
+        rng = np.random.default_rng(SEEDS["coverage"] + alpha)
+        runs = [theo1(power_law_phase(512, alpha, rate_hz=1.0, rng=rng,
+                                      h_alpha=1e-22), taus="octave")
+                for _ in range(trials)]
+        truth = np.mean([r.var for r in runs], axis=0)
+        hits = np.zeros(runs[0].af.size)
+        for r in runs:
+            c = confidence(r, level=ONE_SIGMA, method="theo1", alpha=alpha)
+            hits += (c.var_lo <= truth) & (truth <= c.var_hi)
+        cov = hits / trials
+        worst_lo = min(worst_lo, float(cov.min()))
+        worst_hi = max(worst_hi, float(cov.max()))
+
+    se = float(np.sqrt(ONE_SIGMA * (1.0 - ONE_SIGMA) / trials))
+    lo_bound = ONE_SIGMA - 0.10 - 4.0 * se
+    hi_bound = 0.95
+    ok = lo_bound <= worst_lo and worst_hi <= hi_bound
+    return Check(
+        "coverage", "Thêo1 intervals from SP 1065 Table 9",
+        "Fraction of realizations whose Thêo1 interval contains the "
+        "ensemble truth, over white PM, white FM and random-walk FM at "
+        "N=512, at every averaging factor Thêo1 offers. Table 9 is the only "
+        "degrees-of-freedom route this family has -- there is no "
+        "coefficient array for the data-driven estimators to read -- so "
+        "there is no second opinion to differ from and the measurement is "
+        "the whole of the evidence.",
+        f"containment within [{lo_bound:.3f}, {hi_bound:.3f}] against "
+        f"nominal {ONE_SIGMA:.4f}. The lower bound is nominal minus 0.10 "
+        f"systematic minus four Monte-Carlo standard errors ({se:.3f} at "
+        f"{trials} trials); the upper is deliberately looser, because "
+        "Table 9 is a fitted approximation that under-estimates the "
+        "degrees of freedom at long tau and an interval that is too wide "
+        "is a defect of efficiency rather than of correctness.",
+        f"{worst_lo:.3f} to {worst_hi:.3f} over three power laws",
+        ok,
     )
 
 

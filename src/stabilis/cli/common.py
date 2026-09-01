@@ -18,27 +18,32 @@ import numpy as np
 from ..stats import confidence
 
 __all__ = [
-    "NO_INTERVAL", "NO_KEEP_COEFFS", "_summary", "_add_input_args", "_load",
+    "NO_INTERVAL", "NO_KEEP_COEFFS", "DEFAULT_EDOF_METHOD", "_summary",
+    "_add_input_args", "_load",
     "_confidence_for", "_nan_to_none",
 ]
 
-# Estimators with no confidence interval today, for three different
-# reasons, and offering the flags anyway would be worse than not having
-# them. MTIE and TIE rms are not variances at all, so the chi-square
-# interval does not apply and `confidence` refuses them. The Thêo family
-# *is* a variance family, but it reports no coefficient arrays for the
-# data-driven path and its own EDF (SP 1065 Table 9) is not implemented --
-# see theory/theoh.md. The MTOT family reports coefficient arrays but they
-# are not one time-ordered sequence, so no coefficient-based EDOF applies
-# and `confidence` refuses them -- see theory/mtotal.md.
-NO_INTERVAL = ("mtie", "tierms", "theo1", "theobr", "theoh",
-               "mtotdev", "ttotdev", "htotdev")
+# Estimators with no confidence interval today, for two different reasons,
+# and offering the flags anyway would be worse than not having them. MTIE
+# and TIE rms are not variances at all, so the chi-square interval does not
+# apply and `confidence` refuses them. The MTOT family reports coefficient
+# arrays but they are not one time-ordered sequence, so no coefficient-based
+# EDOF applies and `confidence` refuses them -- see theory/mtotal.md.
+NO_INTERVAL = ("mtie", "tierms", "mtotdev", "ttotdev", "htotdev")
 
 # The subset that does not accept `keep_coeffs` at all. The rest do, and
 # must be told *not* to keep them: the MTOT family's arrays are quadratic
 # in the record length, so retaining them for an interval that will not be
 # computed is the one place this CLI could run a machine out of memory.
 NO_KEEP_COEFFS = ("mtie", "tierms", "theo1", "theobr", "theoh")
+
+# Estimators whose EDOF has exactly one route, so `auto` would only be a
+# way of failing later. The Thêo family has no coefficient array for the
+# data-driven path -- Thêo1 is a sum over a triangular set of lag pairs
+# rather than a mean of one coefficient per term -- so SP 1065 Table 9 is
+# the only answer, and it needs a noise type. The flag is still offered:
+# the default is the one that works, not the only choice.
+DEFAULT_EDOF_METHOD = {"theo1": "theo1", "theobr": "theo1", "theoh": "theo1"}
 
 
 def _summary(fn) -> str:

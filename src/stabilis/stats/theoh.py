@@ -218,4 +218,14 @@ def theoh(series, taus="octave", max_af: int | None = None,
         var=np.concatenate([allan.var[below], upper.var[above]]),
         n_terms=np.concatenate([allan.n_terms[below], upper.n_terms[above]]),
         rate_hz=series.rate_hz, provenance=prov, span_factor=1,
+        # Carried for the confidence path, which needs two different EDF
+        # formulae on the two halves of this curve: the Allan model-based
+        # one below the crossover and SP 1065 Table 9 above it. The
+        # `run_terms` entries for the upper half are empty on purpose --
+        # a Thêo1 pair count is not an Allan term count, and putting one
+        # there would be a plausible-looking number in the wrong units.
+        run_lengths=upper.run_lengths,
+        run_terms=(tuple(allan.run_terms[i] for i in np.flatnonzero(below))
+                   + tuple(np.empty(0, dtype=np.int64)
+                           for _ in range(int(above.sum())))),
     )

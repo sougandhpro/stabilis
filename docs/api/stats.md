@@ -17,7 +17,7 @@ The variance family, confidence intervals, noise identification, power spectra a
 - **`stabilis.stats.core`** -- The shared result type and the estimator driver.
   <br>`GAP_POLICIES`, `Shape`, `StabilityResult`, `phase_runs`, `run_estimator`
 - **`stabilis.stats.edof`** -- Equivalent degrees of freedom, estimated from the data itself.
-  <br>`EDOF_METHODS`, `DATA_DRIVEN_METHODS`, `MIN_TERMS_FOR_ETA1`, `eta1`, `eta3`, `edof`, `TOTVAR_EDOF_BC`, `totvar_edof`
+  <br>`EDOF_METHODS`, `DATA_DRIVEN_METHODS`, `MIN_TERMS_FOR_ETA1`, `eta1`, `eta3`, `edof`, `TOTVAR_EDOF_BC`, `totvar_edof`, `THEO1_EDF_NOISES`, `theo1_edof`
 - **`stabilis.stats.greenhall`** -- Greenhall EDOF -- degrees of freedom from an assumed power law.
   <br>`J_MAX`, `GREENHALL_ALPHAS`, `GREENHALL_ORDERS`, `GREENHALL_RUN_POLICIES`, `term_count`, `greenhall_edof_simple`, `greenhall_edof`, `greenhall_edof_pooled`
 - **`stabilis.stats.isserlis`** -- Fourth moments of Gaussian coefficient arrays, exactly.
@@ -613,7 +613,7 @@ returns, and nothing needed is a noise type. See theory/edof.md.
 #### `EDOF_METHODS`
 
 ```python
-EDOF_METHODS = ('auto', 'eta1', 'eta3', 'greenhall', 'totvar')
+EDOF_METHODS = ('auto', 'eta1', 'eta3', 'greenhall', 'totvar', 'theo1')
 ```
 
 "greenhall" is dispatched by stats.ci, not here: it is a function of the noise type and the record geometry rather than of the coefficients, so it shares none of this module's inputs. It is listed here because this tuple is the single source of truth for what a caller -- and the CLI -- may ask for. `auto` deliberately never resolves to it; see the module docstring. "totvar" and "greenhall" both assume a power law; neither is ever chosen by "auto", because staying noise-type-free is the point.
@@ -734,6 +734,55 @@ For white and flicker PM, SP 1065 says the edf equals the overlapping
 ADEV's "with the number of chi-square degrees of freedom increased by
 2" -- so that case needs the Allan edf passed in rather than derived
 here.
+
+#### `THEO1_EDF_NOISES`
+
+```python
+THEO1_EDF_NOISES = (2, 1, 0, -1, -2)
+```
+
+NIST SP 1065 Table 9, section 5.4.4: the equivalent chi-square degrees of freedom for Thêo1, "hence, ThêoBR and ThêoH". Transcribed from the rendered page rather than the text layer -- the extracted text collapses every fraction in the table onto one line and loses which terms are in which numerator.  `t` throughout is the table's tau **in units of tau0**, and the table says plainly what SP 1065 contradicts itself about elsewhere: "tau = 0.75m, m = averaging factor". So `t = 0.75 * m`, the same reading `stats/theo1.py` arrived at from three independent arguments. `nx` is the number of phase data points.  Every row is a product of two factors, and the second is always a roll-off of the form t^p/(t^p + c) that pulls the edf down at short tau. They are approximations fitted by their authors, not identities: they can and do go negative for small `nx` at large `t`, which is why `theo1_edof` floors rather than returning what the formula says.
+
+#### `theo1_edof`
+
+```python
+theo1_edof(alpha: int, m: int, n_phase: int) -> float
+```
+
+Thêo1 degrees of freedom, SP 1065 Table 9.
+
+    t = 0.75 * m,   nx = number of phase points
+
+    alpha=+2  [0.86 (nx+1)(nx - 4t/3) / (nx - t)] [t/(t+1.14)]
+    alpha=+1  [(4.798 nx^2 - 6.374 nx t + 12.387 t)
+               / ((t+36.6)^(1/2) (nx - t))] [t/(t+0.3)]
+    alpha= 0  [(4.1 nx + 0.8)/t - (3.1 nx + 6.5)/nx]
+              [t^(3/2)/(t^(3/2) + 5.2)]
+    alpha=-1  [(2 nx^2 - 1.3 nx t - 3.5 t)/(nx t)] [t^3/(t^3 + 2.3)]
+    alpha=-2  [(4.4 nx - 2)/(2.9 t)]
+              [((4.4 nx - 1)^2 - 8.6 t (4.4 nx - 1) + 11.4 t^2)
+               / (4.4 nx - 3)^2]
+
+This is the only EDOF path in the library that has no data-driven
+alternative. Thêo1 is a sum over a triangular set of lag pairs rather
+than a mean of one coefficient per term, so there is no array whose
+autocorrelation `eta1` could read -- which is why the Thêo family had
+no confidence interval at all until this table was implemented.
+
+**White PM is not monotone in `m`, and that is the formula, not a
+transcription slip.** Every row is a product of a falling term and a
+roll-off `t^p/(t^p + c)` that pulls the edf down at short tau. In the
+white-PM row the falling term is very nearly constant while `t << nx` --
+the `4t/3` in its numerator and the `t` in its denominator almost cancel
+against `nx` -- so the roll-off wins and the edf *rises* with `t` until
+`t` becomes comparable to `nx`. At N = 4001 it peaks near `m = 200` and
+falls thereafter. The other four rows fall from the shortest tau.
+
+**Floored at 1.** These are fitted approximations, not identities, and
+the white-PM and flicker-PM rows have `nx - t` in a denominator: at the
+largest Thêo1 averaging factor `t` approaches `0.75(N-1)`, so for a
+short record the fit can return a negative or absurd number. One degree
+of freedom is the floor everywhere else here and it is the floor here.
 
 ---
 

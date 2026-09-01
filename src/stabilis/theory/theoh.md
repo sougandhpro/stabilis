@@ -107,13 +107,53 @@ before a long record does.
 `stats.bias.theo1_bias` is validated against Table 2 directly, including
 that white FM is exactly 1 at every `m`.
 
+## Confidence: SP 1065 Table 9
+
+**Implemented 2026-09-01**, in `stats/edof.py::theo1_edof`, reached as
+`confidence(result, method="theo1", alpha=…)` and the CLI default for
+`theo1`, `theobr` and `theoh`.
+
+Table 9 gives five fitted formulae in `N` (phase points) and `τ = 0.75m`,
+one per power law. **It is the only route this family has**: Thêo1 is a sum
+over a triangular set of lag pairs rather than a mean of one coefficient
+per term, so there is no array for `eta1` to read an autocorrelation from,
+and the noise type is therefore not optional here the way it is for the
+classical estimators. Transcribed from the rendered page, not the text
+layer — the extraction collapses every fraction onto one line and loses
+which terms are in which numerator.
+
+Two properties worth knowing before reading a number off it:
+
+* **White PM is not monotone in `m`.** Every row is a falling term times a
+  roll-off `t^p/(t^p + c)`. In the white-PM row the falling term is nearly
+  constant while `t ≪ N` — the `4t/3` in its numerator very nearly cancels
+  the `t` in its denominator — so the roll-off wins and the edf *rises*
+  with `τ` until `τ` approaches `N`. At N = 4001 it peaks near m = 200.
+  That is the published formula, and it is asserted rather than smoothed.
+* **They are fitted approximations and can return absurd values.** The
+  white-PM and flicker-PM rows carry `N − τ` in a denominator while Thêo1
+  runs out to `τ = 0.75(N−1)`, so a short record can drive them negative.
+  `theo1_edof` floors at one degree of freedom, as everything else here
+  does.
+
+**ThêoH takes two formulae, not one.** It is AVAR below the crossover and
+ThêoBR above it, so one model would be wrong on half the curve: Greenhall's
+overlapping-Allan model supplies the lower points and Table 9 the upper
+ones, and `Confidence.method` records which per tau. `theoh` carries the
+run geometry for exactly this, with empty per-run term counts on the upper
+half — a Thêo1 pair count is not an Allan term count, and putting one there
+would be a plausible-looking number in the wrong units.
+
+**Measured coverage**, since a published table is worth what its coverage
+measures and this one has no second implementation to differ from: over
+white PM, white FM and random-walk FM at N = 512, containment runs 0.59 to
+0.91 against a nominal 0.6827, over-covering at long τ where the table
+under-estimates the degrees of freedom. A row in `stabilis validate` scores
+it with a deliberately asymmetric band — an interval too wide is a defect
+of efficiency, one too narrow is a defect of correctness.
+
 ## Not yet
 
-* **The Thêo1 EDF**, SP 1065 Table 9 — five power-law formulae in `N` and
-  `tau`. Until it is here the Thêo family has no confidence interval, since
-  it reports no coefficient arrays for the data-driven path either, and the
-  CLI offers no interval flags for it rather than offering ones that would
-  fail.
 * **Fast TheoBR**, the phase-averaged form that makes long records
   practical.
 * Whether Stable32's ThêoH agrees with this one point for point. It is in

@@ -103,7 +103,7 @@ Whichever route, ask the installed package what it is rather than assuming:
 
 ```bash
 python3 -c "import stabilis; print(stabilis.__version__)"
-stabilis validate                     # 41/41, and a digest over the evidence
+stabilis validate                     # 42/42, and a digest over the evidence
 ```
 
 `stabilis validate` is the honest check that a remote machine got a working
@@ -172,7 +172,7 @@ either is stale, so a signature can never drift away from its description.
 ## Status
 
 **M0–M3, M5 and M6 complete, plus the measurement report, the fitting
-layer, the export layer, and most of M8.** 1532 tests; `stabilis validate` 41/41.
+layer, the export layer, and most of M8.** 1547 tests; `stabilis validate` 42/42.
 
 M2 was the v0.1 line — the first version from which an uncertainty may
 legitimately be quoted. Since then:
@@ -212,7 +212,11 @@ legitimately be quoted. Since then:
 - **MTIE and TIE rms**, by binary doubling: 10⁶ points over 18 octave τ in
   0.15 s, where the naive form is O(N·m) per τ.
 - **TOTVAR** with its published bias correction, and **Thêo1 / ThêoBR /
-  ThêoH** — extending the usable τ range to 75 % of the record.
+  ThêoH** — extending the usable τ range to 75 % of the record, now **with
+  confidence intervals**, from SP 1065 Table 9. ThêoH takes two formulae
+  rather than one: it is AVAR below its crossover and ThêoBR above, so one
+  model would be wrong on half the curve, and the table says which was used
+  at every τ.
 - **MTOT, TTOT and HTOT**, the total variances built on 3m subsequences,
   which keep 6m terms at every τ instead of collapsing at the long end.
   Cross-checked against a second implementation of the published equations
@@ -314,8 +318,8 @@ correct digits. See `docs/stabilis-progress.pdf`.
 
 </details>
 
-**Next** — the Thêo family's confidence intervals, and the
-imputation-free gap-tolerant wavelet variance. Instrument readers wait on
+**Next** — the imputation-free gap-tolerant wavelet variance, and drift
+removal. Instrument readers wait on
 paired vendor exports, and binding live sources to bench channels waits on
 a real appending file.
 

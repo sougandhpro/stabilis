@@ -17,8 +17,8 @@ from ..stats.core import GAP_POLICIES
 from ..stats.edof import EDOF_METHODS
 from ..stats.greenhall import GREENHALL_RUN_POLICIES
 from ..tau import MODES
-from .common import (NO_INTERVAL, NO_KEEP_COEFFS, _add_input_args,
-                     _confidence_for, _load, _summary)
+from .common import (DEFAULT_EDOF_METHOD, NO_INTERVAL, NO_KEEP_COEFFS,
+                     _add_input_args, _confidence_for, _load, _summary)
 
 __all__ = ["add_estimators", "add_wdev"]
 
@@ -67,7 +67,7 @@ def add_estimators(sub) -> None:
         )
         p.add_argument(
             "--edof-method",
-            default="auto",
+            default=DEFAULT_EDOF_METHOD.get(name, "auto"),
             choices=EDOF_METHODS,
             help="degrees-of-freedom estimator; see `stabilis docs edof`",
         )
@@ -208,8 +208,13 @@ def _print_result(args, result, ci, header: str) -> int:
     )
     for af, tau, n, a, lo, dev, hi, eta, how in rows:
         # A declined point has no assumed power law, so the column is blank
-        # rather than carrying the sentinel out into the user's table.
-        shown = "" if a is None else ("" if how != "greenhall" else f"{a:d}")
+        # rather than carrying the sentinel out into the user's table. The
+        # test is which estimator actually ran, not which was asked for:
+        # `eta1` and `eta3` are the two that need no noise type, so a point
+        # that fell back to either used none. Keyed that way rather than on
+        # the name `greenhall`, which was the only model-based method when
+        # this was written and is now one of three.
+        shown = "" if a is None or how in ("eta1", "eta3") else f"{a:d}"
         cell = f"  {shown:>5}" if ci.alpha is not None else ""
         print(
             f"{af:>7}  {tau:>13.4e}  {n:>8}{cell}  {lo:>14.6e}  {dev:>14.6e}  "
@@ -217,7 +222,7 @@ def _print_result(args, result, ci, header: str) -> int:
         )
     reasons = sorted({d for d in ci.declined if d})
     for why in reasons:
-        print(f"# declined greenhall where: {why}")
+        print(f"# declined {args.edof_method} where: {why}")
     return 0
 
 

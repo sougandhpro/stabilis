@@ -219,7 +219,7 @@ usage: stabilis adev [-h] [--kind {phase,frequency}] [--rate RATE] [--column COL
                      [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
                      [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
                      [--confidence CONFIDENCE]
-                     [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                     [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                      [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
                      [--no-confidence] [--json]
                      path
@@ -248,7 +248,7 @@ options:
   --confidence CONFIDENCE
                         confidence level for the sigma bounds (default: 1 sigma,
                         0.6827)
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --alpha {2,1,0,-1,-2,-3,-4}
                         power law to assume, with --edof-method greenhall. Omit to
@@ -272,7 +272,7 @@ usage: stabilis oadev [-h] [--kind {phase,frequency}] [--rate RATE] [--column CO
                       [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
                       [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
                       [--confidence CONFIDENCE]
-                      [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                      [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                       [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
                       [--no-confidence] [--json]
                       path
@@ -301,7 +301,7 @@ options:
   --confidence CONFIDENCE
                         confidence level for the sigma bounds (default: 1 sigma,
                         0.6827)
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --alpha {2,1,0,-1,-2,-3,-4}
                         power law to assume, with --edof-method greenhall. Omit to
@@ -325,7 +325,7 @@ usage: stabilis mdev [-h] [--kind {phase,frequency}] [--rate RATE] [--column COL
                      [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
                      [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
                      [--confidence CONFIDENCE]
-                     [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                     [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                      [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
                      [--no-confidence] [--json]
                      path
@@ -354,7 +354,7 @@ options:
   --confidence CONFIDENCE
                         confidence level for the sigma bounds (default: 1 sigma,
                         0.6827)
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --alpha {2,1,0,-1,-2,-3,-4}
                         power law to assume, with --edof-method greenhall. Omit to
@@ -378,7 +378,7 @@ usage: stabilis tdev [-h] [--kind {phase,frequency}] [--rate RATE] [--column COL
                      [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
                      [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
                      [--confidence CONFIDENCE]
-                     [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                     [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                      [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
                      [--no-confidence] [--json]
                      path
@@ -407,7 +407,7 @@ options:
   --confidence CONFIDENCE
                         confidence level for the sigma bounds (default: 1 sigma,
                         0.6827)
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --alpha {2,1,0,-1,-2,-3,-4}
                         power law to assume, with --edof-method greenhall. Omit to
@@ -431,7 +431,7 @@ usage: stabilis ohdev [-h] [--kind {phase,frequency}] [--rate RATE] [--column CO
                       [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
                       [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
                       [--confidence CONFIDENCE]
-                      [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                      [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                       [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
                       [--no-confidence] [--json]
                       path
@@ -460,7 +460,7 @@ options:
   --confidence CONFIDENCE
                         confidence level for the sigma bounds (default: 1 sigma,
                         0.6827)
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --alpha {2,1,0,-1,-2,-3,-4}
                         power law to assume, with --edof-method greenhall. Omit to
@@ -484,7 +484,7 @@ usage: stabilis totdev [-h] [--kind {phase,frequency}] [--rate RATE] [--column C
                        [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
                        [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
                        [--confidence CONFIDENCE]
-                       [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                       [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                        [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
                        [--no-confidence] [--json]
                        path
@@ -513,7 +513,7 @@ options:
   --confidence CONFIDENCE
                         confidence level for the sigma bounds (default: 1 sigma,
                         0.6827)
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --alpha {2,1,0,-1,-2,-3,-4}
                         power law to assume, with --edof-method greenhall. Omit to
@@ -643,7 +643,11 @@ Thêo1 deviation, out to 75 % of the record length..
 usage: stabilis theo1 [-h] [--kind {phase,frequency}] [--rate RATE] [--column COLUMN]
                       [--time-column TIME_COLUMN] [--delimiter DELIMITER]
                       [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
-                      [--max-af MAX_AF] [--gap-policy {auto,mask,segment}] [--json]
+                      [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
+                      [--confidence CONFIDENCE]
+                      [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
+                      [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
+                      [--no-confidence] [--json]
                       path
 
 positional arguments:
@@ -667,6 +671,20 @@ options:
   --max-af MAX_AF       largest averaging factor
   --gap-policy {auto,mask,segment}
                         how a gap affects nearby terms; see `stabilis docs gaps`
+  --confidence CONFIDENCE
+                        confidence level for the sigma bounds (default: 1 sigma,
+                        0.6827)
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
+                        degrees-of-freedom estimator; see `stabilis docs edof`
+  --alpha {2,1,0,-1,-2,-3,-4}
+                        power law to assume, with --edof-method greenhall. Omit to
+                        identify it per tau; pass Stable32's Alpha column to reproduce
+                        one of its runs exactly. See `stabilis docs greenhall`
+  --run-policy {pool,fallback}
+                        on a gapped record, whether greenhall pools the runs or
+                        declines to them (default: pool)
+  --no-confidence       skip the bounds; also frees the coefficient arrays, which
+                        matter on a record of millions of points
   --json                emit JSON
 ```
 
@@ -678,7 +696,11 @@ Bias-removed thêo1, sp 1065 eq. (33)..
 usage: stabilis theobr [-h] [--kind {phase,frequency}] [--rate RATE] [--column COLUMN]
                        [--time-column TIME_COLUMN] [--delimiter DELIMITER]
                        [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
-                       [--max-af MAX_AF] [--gap-policy {auto,mask,segment}] [--json]
+                       [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
+                       [--confidence CONFIDENCE]
+                       [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
+                       [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
+                       [--no-confidence] [--json]
                        path
 
 positional arguments:
@@ -702,6 +724,20 @@ options:
   --max-af MAX_AF       largest averaging factor
   --gap-policy {auto,mask,segment}
                         how a gap affects nearby terms; see `stabilis docs gaps`
+  --confidence CONFIDENCE
+                        confidence level for the sigma bounds (default: 1 sigma,
+                        0.6827)
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
+                        degrees-of-freedom estimator; see `stabilis docs edof`
+  --alpha {2,1,0,-1,-2,-3,-4}
+                        power law to assume, with --edof-method greenhall. Omit to
+                        identify it per tau; pass Stable32's Alpha column to reproduce
+                        one of its runs exactly. See `stabilis docs greenhall`
+  --run-policy {pool,fallback}
+                        on a gapped record, whether greenhall pools the runs or
+                        declines to them (default: pool)
+  --no-confidence       skip the bounds; also frees the coefficient arrays, which
+                        matter on a record of millions of points
   --json                emit JSON
 ```
 
@@ -713,7 +749,11 @@ Thêoh, sp 1065 eq. (34): avar at short tau, thêobr beyond it..
 usage: stabilis theoh [-h] [--kind {phase,frequency}] [--rate RATE] [--column COLUMN]
                       [--time-column TIME_COLUMN] [--delimiter DELIMITER]
                       [--gap-value GAP_VALUE] [--taus {all,octave,decade,log}]
-                      [--max-af MAX_AF] [--gap-policy {auto,mask,segment}] [--json]
+                      [--max-af MAX_AF] [--gap-policy {auto,mask,segment}]
+                      [--confidence CONFIDENCE]
+                      [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
+                      [--alpha {2,1,0,-1,-2,-3,-4}] [--run-policy {pool,fallback}]
+                      [--no-confidence] [--json]
                       path
 
 positional arguments:
@@ -737,6 +777,20 @@ options:
   --max-af MAX_AF       largest averaging factor
   --gap-policy {auto,mask,segment}
                         how a gap affects nearby terms; see `stabilis docs gaps`
+  --confidence CONFIDENCE
+                        confidence level for the sigma bounds (default: 1 sigma,
+                        0.6827)
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
+                        degrees-of-freedom estimator; see `stabilis docs edof`
+  --alpha {2,1,0,-1,-2,-3,-4}
+                        power law to assume, with --edof-method greenhall. Omit to
+                        identify it per tau; pass Stable32's Alpha column to reproduce
+                        one of its runs exactly. See `stabilis docs greenhall`
+  --run-policy {pool,fallback}
+                        on a gapped record, whether greenhall pools the runs or
+                        declines to them (default: pool)
+  --no-confidence       skip the bounds; also frees the coefficient arrays, which
+                        matter on a record of millions of points
   --json                emit JSON
 ```
 
@@ -819,7 +873,7 @@ usage: stabilis wdev [-h] [--kind {phase,frequency}] [--rate RATE] [--column COL
                      [--time-column TIME_COLUMN] [--delimiter DELIMITER]
                      [--gap-value GAP_VALUE] [--filter {d4,d6,d8,haar}]
                      [--levels LEVELS] [--biased] [--confidence CONFIDENCE]
-                     [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                     [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                      [--no-confidence] [--json]
                      path
 
@@ -850,7 +904,7 @@ options:
                         adjacent to its start
   --confidence CONFIDENCE
                         confidence level for the sigma bounds (default: 1 sigma)
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --no-confidence       skip the bounds
   --json                emit JSON
@@ -1227,8 +1281,8 @@ usage: stabilis mask [-h] [--kind {phase,frequency}] [--rate RATE] [--column COL
                      [--gap-value GAP_VALUE] [--mask MASK] [--list-masks]
                      [--taus {all,octave,decade,log}] [--max-af MAX_AF]
                      [--confidence CONFIDENCE]
-                     [--edof-method {auto,eta1,eta3,greenhall,totvar}] [--alpha ALPHA]
-                     [--no-confidence] [--json]
+                     [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
+                     [--alpha ALPHA] [--no-confidence] [--json]
                      [path]
 
 positional arguments:
@@ -1252,7 +1306,7 @@ options:
   --taus {all,octave,decade,log}
   --max-af MAX_AF
   --confidence CONFIDENCE
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
   --alpha ALPHA         assumed power law
   --no-confidence       judge the point estimate; for a variance this is simple
                         acceptance and is not the default
@@ -1452,7 +1506,7 @@ usage: stabilis export table [-h] [--kind {phase,frequency}] [--rate RATE]
                              [--taus {all,octave,decade,log}] [--max-af MAX_AF]
                              [--gap-policy {auto,mask,segment}]
                              [--confidence CONFIDENCE]
-                             [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                             [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                              [--alpha ALPHA] [--no-confidence]
                              [--format {csv,json,stable32}] [--out OUT]
                              path
@@ -1478,7 +1532,7 @@ options:
   --max-af MAX_AF       largest averaging factor
   --gap-policy {auto,mask,segment}
   --confidence CONFIDENCE
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
   --alpha ALPHA         assumed power law; required by --format stable32 unless the
                         interval already carries one
   --no-confidence       curve only, no interval
@@ -1501,7 +1555,7 @@ usage: stabilis export bundle [-h] [--kind {phase,frequency}] [--rate RATE]
                               [--taus {all,octave,decade,log}] [--max-af MAX_AF]
                               [--gap-policy {auto,mask,segment}]
                               [--confidence CONFIDENCE]
-                              [--edof-method {auto,eta1,eta3,greenhall,totvar}]
+                              [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
                               [--alpha ALPHA] [--spec TAU:SIGMA] [--bench BENCH]
                               [--source SOURCE] [--title TITLE] [--subject SUBJECT]
                               [--operator OPERATOR] [--notes NOTES] [--no-data]
@@ -1529,7 +1583,7 @@ options:
   --max-af MAX_AF       largest averaging factor
   --gap-policy {auto,mask,segment}
   --confidence CONFIDENCE
-  --edof-method {auto,eta1,eta3,greenhall,totvar}
+  --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
   --alpha ALPHA         assumed power law
   --spec TAU:SIGMA      a datasheet limit, repeatable
   --bench BENCH         bench.json, to take the limits from

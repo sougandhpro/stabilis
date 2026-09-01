@@ -35,6 +35,8 @@ __all__ = [
     "eta3",
     "edof",
     "EDOF_METHODS",
+    "theo1_edof",
+    "THEO1_EDF_NOISES",
     "DATA_DRIVEN_METHODS",
     "MIN_TERMS_FOR_ETA1",
 ]
@@ -46,7 +48,7 @@ __all__ = [
 # for. `auto` deliberately never resolves to it; see the module docstring.
 # "totvar" and "greenhall" both assume a power law; neither is ever
 # chosen by "auto", because staying noise-type-free is the point.
-EDOF_METHODS = ("auto", "eta1", "eta3", "greenhall", "totvar")
+EDOF_METHODS = ("auto", "eta1", "eta3", "greenhall", "totvar", "theo1")
 DATA_DRIVEN_METHODS = ("auto", "eta1", "eta3")
 
 # Below this many terms the sample autocorrelation is mostly noise and eta1
@@ -243,3 +245,86 @@ def totvar_edof(alpha: int, tau_s: float, record_s: float,
         raise ValueError("tau and record length must be positive")
     b, c = TOTVAR_EDOF_BC[alpha]
     return max(1.0, b * (record_s / tau_s) - c)
+
+# NIST SP 1065 Table 9, section 5.4.4: the equivalent chi-square degrees of
+# freedom for Thêo1, "hence, ThêoBR and ThêoH". Transcribed from the
+# rendered page rather than the text layer -- the extracted text collapses
+# every fraction in the table onto one line and loses which terms are in
+# which numerator.
+#
+# `t` throughout is the table's tau **in units of tau0**, and the table
+# says plainly what SP 1065 contradicts itself about elsewhere:
+# "tau = 0.75m, m = averaging factor". So `t = 0.75 * m`, the same reading
+# `stats/theo1.py` arrived at from three independent arguments. `nx` is the
+# number of phase data points.
+#
+# Every row is a product of two factors, and the second is always a
+# roll-off of the form t^p/(t^p + c) that pulls the edf down at short tau.
+# They are approximations fitted by their authors, not identities: they can
+# and do go negative for small `nx` at large `t`, which is why
+# `theo1_edof` floors rather than returning what the formula says.
+THEO1_EDF_NOISES = (2, 1, 0, -1, -2)
+
+
+def theo1_edof(alpha: int, m: int, n_phase: int) -> float:
+    """Thêo1 degrees of freedom, SP 1065 Table 9.
+
+        t = 0.75 * m,   nx = number of phase points
+
+        alpha=+2  [0.86 (nx+1)(nx - 4t/3) / (nx - t)] [t/(t+1.14)]
+        alpha=+1  [(4.798 nx^2 - 6.374 nx t + 12.387 t)
+                   / ((t+36.6)^(1/2) (nx - t))] [t/(t+0.3)]
+        alpha= 0  [(4.1 nx + 0.8)/t - (3.1 nx + 6.5)/nx]
+                  [t^(3/2)/(t^(3/2) + 5.2)]
+        alpha=-1  [(2 nx^2 - 1.3 nx t - 3.5 t)/(nx t)] [t^3/(t^3 + 2.3)]
+        alpha=-2  [(4.4 nx - 2)/(2.9 t)]
+                  [((4.4 nx - 1)^2 - 8.6 t (4.4 nx - 1) + 11.4 t^2)
+                   / (4.4 nx - 3)^2]
+
+    This is the only EDOF path in the library that has no data-driven
+    alternative. Thêo1 is a sum over a triangular set of lag pairs rather
+    than a mean of one coefficient per term, so there is no array whose
+    autocorrelation `eta1` could read -- which is why the Thêo family had
+    no confidence interval at all until this table was implemented.
+
+    **White PM is not monotone in `m`, and that is the formula, not a
+    transcription slip.** Every row is a product of a falling term and a
+    roll-off `t^p/(t^p + c)` that pulls the edf down at short tau. In the
+    white-PM row the falling term is very nearly constant while `t << nx` --
+    the `4t/3` in its numerator and the `t` in its denominator almost cancel
+    against `nx` -- so the roll-off wins and the edf *rises* with `t` until
+    `t` becomes comparable to `nx`. At N = 4001 it peaks near `m = 200` and
+    falls thereafter. The other four rows fall from the shortest tau.
+
+    **Floored at 1.** These are fitted approximations, not identities, and
+    the white-PM and flicker-PM rows have `nx - t` in a denominator: at the
+    largest Thêo1 averaging factor `t` approaches `0.75(N-1)`, so for a
+    short record the fit can return a negative or absurd number. One degree
+    of freedom is the floor everywhere else here and it is the floor here.
+    """
+    if alpha not in THEO1_EDF_NOISES:
+        raise ValueError(
+            f"theo1_edof: SP 1065 Table 9 covers alpha in "
+            f"{sorted(THEO1_EDF_NOISES)}, not {alpha}")
+    nx = float(n_phase)
+    t = 0.75 * float(m)
+    if t <= 0.0 or nx <= t:
+        return 1.0
+
+    if alpha == 2:
+        edf = (0.86 * (nx + 1.0) * (nx - 4.0 * t / 3.0) / (nx - t)) \
+            * (t / (t + 1.14))
+    elif alpha == 1:
+        edf = ((4.798 * nx * nx - 6.374 * nx * t + 12.387 * t)
+               / (np.sqrt(t + 36.6) * (nx - t))) * (t / (t + 0.3))
+    elif alpha == 0:
+        edf = ((4.1 * nx + 0.8) / t - (3.1 * nx + 6.5) / nx) \
+            * (t**1.5 / (t**1.5 + 5.2))
+    elif alpha == -1:
+        edf = ((2.0 * nx * nx - 1.3 * nx * t - 3.5 * t) / (nx * t)) \
+            * (t**3 / (t**3 + 2.3))
+    else:
+        a = 4.4 * nx - 1.0
+        edf = ((4.4 * nx - 2.0) / (2.9 * t)) \
+            * ((a * a - 8.6 * t * a + 11.4 * t * t) / (4.4 * nx - 3.0) ** 2)
+    return max(float(edf), 1.0)

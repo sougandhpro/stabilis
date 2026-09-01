@@ -305,16 +305,38 @@ def test_cli_wdev_names_the_filter_and_its_vanishing_moments(tmp_path, capsys):
 
 
 @pytest.mark.parametrize("name", ["theo1", "theobr", "theoh"])
-def test_cli_theo_family_runs_without_interval_flags(tmp_path, capsys, name):
-    """`stabilis theo1` used to crash outright.
+def test_cli_theo_family_prints_bounds_from_table_9(tmp_path, capsys, name):
+    """`stabilis theo1` used to crash outright, then ran without bounds.
 
     `_cmd_estimate` passed `keep_coeffs` to every estimator that was not
     MTIE or TIE rms, and Thêo1 does not take it -- an unhandled TypeError on
-    a documented subcommand. The Thêo family reports no coefficient arrays
-    and its own EDF (SP 1065 Table 9) is not implemented, so it belongs in
-    the same no-interval list, which is now one constant driving both the
-    parser and the call.
+    a documented subcommand. Two constants now drive that separately:
+    `NO_KEEP_COEFFS` says who cannot be asked to keep an array, and
+    `NO_INTERVAL` says who has no error bar. The Thêo family is in the
+    first and, since SP 1065 Table 9 was implemented, no longer in the
+    second -- so it prints bounds, and it defaults to the one EDOF method
+    that can produce them rather than to `auto`, which would fail.
     """
+    p = _noise_file(tmp_path, n=600)
+    assert main([name, str(p), "--kind", "phase", "--rate", "1"]) == 0
+    out = capsys.readouterr().out
+    assert name.upper() in out
+    assert "Min" in out and "EDOF" in out
+    assert "theo1" in out, "Table 9 is the method that ran"
+    # And the interval flags are real, not decorative.
+    assert main([name, str(p), "--kind", "phase", "--rate", "1",
+                 "--confidence", "0.95"]) == 0
+    wide = capsys.readouterr().out
+    assert "95.0000% confidence" in wide
+
+
+@pytest.mark.parametrize("name", ["mtie", "tierms", "mtotdev", "htotdev"])
+def test_cli_estimators_without_an_interval_offer_no_interval_flags(
+        tmp_path, capsys, name):
+    """The other half of the same constant. MTIE and TIE rms are not
+    variances; the MTOT family's terms are not one time-ordered sequence.
+    Offering a `--confidence` that could only fail is worse than not
+    having it."""
     p = _noise_file(tmp_path, n=600)
     assert main([name, str(p), "--kind", "phase", "--rate", "1"]) == 0
     out = capsys.readouterr().out

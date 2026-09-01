@@ -459,6 +459,18 @@ waiting on anything:
   SP 1065 integrals they descend from and against the shipped `oadev` and
   `mdev` over 300 realizations. The one row with a residual gap is item 2
   above, and it is bounded and explained rather than open;
+- **the Thêo family's confidence intervals**, closed 2026-09-01. SP 1065
+  Table 9 is implemented in `stats/edof.py::theo1_edof` and is the only
+  degrees-of-freedom route this family has — Thêo1 is a sum over a
+  triangular set of lag pairs, not a mean of one coefficient per term, so
+  there is no array for the data-driven estimators to read. Because there
+  is no second opinion to differ from, it is *measured*: containment runs
+  0.59–0.91 against a nominal 0.6827 over three power laws at N = 512, a
+  row in the validation report, over-covering at long τ where the fitted
+  table under-estimates the degrees of freedom. ThêoH takes two formulae
+  rather than one — Greenhall's overlapping-Allan model below its
+  crossover, Table 9 above — because one would be wrong on half the curve.
+  See `theory/theoh.md`;
 - **the wavelet variance, level included, for every filter.** Closed
   2026-09-01, and it was item 11 on this list until then. `modwt`'s
   response at each level is compared against the equivalent filter built

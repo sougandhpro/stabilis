@@ -36,7 +36,7 @@ from ..provenance import Provenance
 from .core import StabilityResult, require_ordered_coeffs
 from .edof import EDOF_METHODS, edof
 from .greenhall import GREENHALL_RUN_POLICIES, greenhall_edof_pooled
-from .edof import eta3, totvar_edof
+from .edof import eta3, theo1_edof, totvar_edof
 
 __all__ = ["Confidence", "confidence", "chi2_interval", "ONE_SIGMA", "TWO_SIGMA"]
 
@@ -149,6 +149,84 @@ def alpha_per_tau(result: StabilityResult, alpha=None, series=None) -> np.ndarra
     )
 
 
+def _theo1_etas(result, alphas, run_policy):
+    """SP 1065 Table 9 per tau, pooled over runs -- and ThêoH's two halves.
+
+    Thêo1 is a sum over a triangular set of lag pairs, not a mean of one
+    coefficient per term, so there is no array for `eta1` to read an
+    autocorrelation from. Table 9 is the only route, and it needs a noise
+    type, which is why `alpha` or `series` is not optional here.
+
+    **ThêoH is two estimators spliced**, and one number from either formula
+    would be wrong on half the curve. Below the crossover recorded in its
+    provenance the points are overlapping Allan, so the Greenhall model
+    supplies those; above it they are ThêoBR and Table 9 supplies them.
+    Which was used lands in `Confidence.method` per tau, because a curve
+    whose error bars come from two different models must be able to say so.
+
+    Runs are pooled by summing degrees of freedom, the same principle the
+    Greenhall path uses: a run shorter than the averaging factor
+    contributed no terms and contributes no degrees of freedom.
+    """
+    runs = result.run_lengths or (int(result.n_terms.max()),)
+    crossover = _theoh_crossover(result)
+    etas, used, declined = [], [], []
+    for i, m in enumerate(result.af.tolist()):
+        if alphas[i] == _UNIDENTIFIED:
+            etas.append(eta3(int(result.n_terms[i]), m, result.span_factor))
+            used.append("eta3")
+            declined.append(
+                f"too few averaged points to identify the noise at m={m}")
+            continue
+        if crossover is not None and result.tau_s[i] <= crossover:
+            eta, how, why = _theoh_allan_eta(result, i, int(alphas[i]),
+                                             m, runs, run_policy)
+            etas.append(eta)
+            used.append(how)
+            declined.append(why)
+            continue
+        total = sum(theo1_edof(int(alphas[i]), m, length)
+                    for length in runs if length > m)
+        etas.append(max(total, 1.0))
+        used.append("theo1")
+        declined.append("")
+    return etas, used, declined
+
+
+def _theoh_crossover(result: StabilityResult):
+    """The tau at which ThêoH stops being Allan, or None if not a ThêoH."""
+    if result.kind != "theoh":
+        return None
+    for step in reversed(result.provenance.steps):
+        if step.action == "theoh":
+            return float(step.params["crossover_s"])
+    return None
+
+
+def _theoh_allan_eta(result, i, alpha, m, runs, run_policy):
+    """The Allan half of ThêoH: Greenhall's model for overlapping AVAR.
+
+    Declines to the conservative count rather than guessing when the record
+    is segmented and the policy is strict, or when the noise is too steep
+    for a second difference to be stationary -- the same two ways the
+    ordinary Greenhall path declines.
+    """
+    terms = result.run_terms[i] if i < len(result.run_terms) else None
+    if terms is None or terms.size == 0:
+        return (eta3(int(result.n_terms[i]), m, 2), "eta3",
+                "ThêoH's Allan half kept no per-run term counts")
+    try:
+        eta, how = greenhall_edof_pooled(
+            alpha, 2, m, runs, terms, False, True, run_policy)
+    except ValueError as exc:
+        return (eta3(int(result.n_terms[i]), m, 2), "eta3",
+                str(exc).removeprefix("greenhall: ").split(";")[0])
+    if how != "greenhall":
+        return (eta3(int(result.n_terms[i]), m, 2), "eta3",
+                f"record is in {len(runs)} runs, policy is 'fallback'")
+    return eta, "greenhall", ""
+
+
 def _greenhall_etas(result, alphas, run_policy):
     """EDOF per tau by the model-based route, with the reason where not.
 
@@ -234,19 +312,40 @@ def confidence(
         raise ValueError(
             f"run_policy must be one of {GREENHALL_RUN_POLICIES}, got {run_policy!r}"
         )
-    if len(result.coeffs) != result.af.size:
-        raise ValueError(
-            f"{result.kind}: confidence needs the coefficient arrays; "
-            "the estimator was called with keep_coeffs=False"
-        )
-    require_ordered_coeffs(result, "the confidence interval")
+    # `totvar` and `theo1` are closed-form in the noise type and the record
+    # geometry and never look at the terms, so they are the two methods a
+    # coefficient-free estimator can use. The Thêo family has no coefficient
+    # array at all -- Thêo1 is a sum over a triangular set of lag pairs
+    # rather than a mean of one coefficient per term -- which is why it had
+    # no interval before Table 9 was implemented.
+    if method not in ("totvar", "theo1"):
+        if len(result.coeffs) != result.af.size:
+            raise ValueError(
+                f"{result.kind}: confidence needs the coefficient arrays; "
+                "the estimator was called with keep_coeffs=False"
+            )
+        require_ordered_coeffs(result, "the confidence interval")
 
     alphas = None
     if method == "totvar":
         alphas = alpha_per_tau(result, alpha, series)
         record_s = float(result.n_terms[0] + 2) / result.rate_hz
-        etas, used = [], []
-        for tau, a in zip(result.tau_s, alphas):
+        etas, used, declined = [], [], []
+        for i, (tau, a) in enumerate(zip(result.tau_s, alphas)):
+            # An unidentified point declines to the data-driven estimator
+            # and says so, exactly as the Greenhall path does. Before this
+            # it raised, so one unidentifiable tau at the long end took the
+            # whole curve's error bars with it -- and the long end is where
+            # identification fails first, so that was every real record.
+            if int(a) == _UNIDENTIFIED:
+                eta, how = edof(result.coeffs[i], int(result.af[i]),
+                                result.span_factor, "auto")
+                etas.append(eta)
+                used.append(how)
+                declined.append(
+                    "too few averaged points to identify the noise at "
+                    f"m={int(result.af[i])}")
+                continue
             if int(a) in (2, 1):
                 # SP 1065 defines these against the overlapping ADEV's edf
                 # plus two, so the Allan count is what it is built on.
@@ -256,7 +355,10 @@ def confidence(
             else:
                 etas.append(totvar_edof(int(a), float(tau), record_s))
             used.append("totvar")
-        declined = [""] * len(etas)
+            declined.append("")
+    elif method == "theo1":
+        alphas = alpha_per_tau(result, alpha, series)
+        etas, used, declined = _theo1_etas(result, alphas, run_policy)
     elif method == "greenhall":
         if result.shape is None:
             raise ValueError(
