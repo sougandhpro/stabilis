@@ -51,8 +51,8 @@ package imports and computes with both absent.
 ### From another project, on any machine
 
 ```bash
-pip install "stabilis @ git+https://github.com/sougandhkm/stabilis.git@main"
-pip install "stabilis[plot] @ git+https://github.com/sougandhkm/stabilis.git@main"
+pip install "stabilis @ git+https://github.com/sougandhpro/stabilis.git@main"
+pip install "stabilis[plot] @ git+https://github.com/sougandhpro/stabilis.git@main"
 ```
 
 That is the whole install. There is no PyPI release yet, so the git URL is
@@ -63,7 +63,7 @@ public.
 a report should name the code that produced it, and `@main` moves:
 
 ```bash
-pip install "stabilis @ git+https://github.com/sougandhkm/stabilis.git@6a548f2"
+pip install "stabilis @ git+https://github.com/sougandhpro/stabilis.git@6a548f2"
 ```
 
 Any commit-ish works — a tag, a branch, a full or short SHA. `Provenance`
@@ -75,7 +75,7 @@ Two ways, and they differ in what "update" costs.
 
 ```bash
 # A checkout that follows: `git pull` is the whole update, no reinstall.
-git clone https://github.com/sougandhkm/stabilis.git
+git clone https://github.com/sougandhpro/stabilis.git
 cd stabilis && pip install -e ".[dev,plot]"
 git pull                              # every later update, and that is all
 ```
@@ -90,7 +90,7 @@ validate` against a specific commit.
 ```bash
 # A plain install that is re-pulled on demand.
 pip install --upgrade --force-reinstall --no-deps \
-    "stabilis @ git+https://github.com/sougandhkm/stabilis.git@main"
+    "stabilis @ git+https://github.com/sougandhpro/stabilis.git@main"
 ```
 
 `--force-reinstall` is not superstition: pip treats a direct URL whose
