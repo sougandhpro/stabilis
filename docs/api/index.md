@@ -67,7 +67,7 @@ through a submodule path may move.
 | [`CERTIFIED_DIGITS`](validate.md#certified_digits) | constant | `stabilis.validate.certified` |  |
 | [`Channel`](bench.md#channel) | class | `stabilis.bench.model` | One measurement path through a device -- "A-1", say. |
 | [`check`](bench.md#check) | function | `stabilis.bench.graph` | Full identifiability verdict. Reads no data files. |
-| [`Check`](validate.md#check) | class | `stabilis.validate.report` | One assertion, with the tolerance it was made at and why. |
+| [`Check`](validate.md#check) | class | `stabilis.validate.check` | One assertion, with the tolerance it was made at and why. |
 | [`check_bench`](gui.md#check_bench) | function | `stabilis.gui.bench` | Can this setup separate its oscillators? Reads no data file. |
 | [`CHECKSUMS`](export.md#checksums) | constant | `stabilis.export.bundle` |  |
 | [`chi2_interval`](stats.md#chi2_interval) | function | `stabilis.stats.ci` | Chi-square bounds on a variance, given its degrees of freedom. |
@@ -123,6 +123,7 @@ through a submodule path may move.
 | [`EDOF_METHODS`](stats.md#edof_methods) | constant | `stabilis.stats.edof` | "greenhall" is dispatched by stats.ci, not here: it is a function of the noise type and the record geometry rather than of the coefficients, so it shares none of this module's inputs. It is listed here because this tuple is the single source of truth for what a caller -- and the CLI -- may ask for. `auto` deliberately never resolves to it; see the module docstring. "totvar" and "greenhall" both assume a power law; neither is ever chosen by "auto", because staying noise-type-free is the point. |
 | [`enbw_bins`](stats.md#enbw_bins) | function | `stabilis.stats.window` | Noise-equivalent bandwidth in DFT bins. |
 | [`envelope`](gui.md#envelope) | function | `stabilis.gui.prepare` | The `[start, stop)` slice reduced to one min/max pair per pixel column. |
+| [`ESTIMATORS`](validate.md#estimators) | constant | `stabilis.validate.check` |  |
 | [`estimators`](gui.md#estimators) | function | `stabilis.gui.api` | Every estimator the library has registered, in name order. |
 | [`eta1`](stats.md#eta1) | function | `stabilis.stats.edof` | Data-driven EDOF from the coefficient autocorrelation. |
 | [`eta3`](stats.md#eta3) | function | `stabilis.stats.edof` | Conservative EDOF: one independent term per estimator window. |
@@ -229,6 +230,7 @@ through a submodule path may move.
 | [`Measurement`](bench.md#measurement) | class | `stabilis.bench.model` | One record: two sources, one channel, one file. |
 | [`MeasurementReport`](report.md#measurementreport) | class | `stabilis.report.build` | Everything the rendered document states, and nothing it computes. |
 | [`MIN_AF`](stats.md#min_af) | constant | `stabilis.stats.theo1` | SP 1065: "for m even, and 10 <= m <= N-1". Below ten the inner family has too few members for the weighting to mean anything, and the estimator is not defined there. |
+| [`MIN_COVERAGE_TRIALS`](validate.md#min_coverage_trials) | constant | `stabilis.validate.check` | Coverage cannot be measured meaningfully with fewer than this many realizations -- the estimate's own standard error would swamp the effect being checked. A lower request is raised to this rather than producing a number that looks measured and is not. |
 | [`MIN_FH_TAU_PRODUCT`](core.md#min_fh_tau_product) | constant | `stabilis.powerlaw_coeffs` | A row is used only where `2*pi*f_h*tau` clears this. The conversions are asymptotic in that product, and SP 1065 states they "can be applied only when the dominant noise process decreases toward higher sideband frequencies". Ten is the conventional floor; below it the coefficient is not merely imprecise but wrong in a way no error bar reports. |
 | [`MIN_TERMS_FOR_ETA1`](stats.md#min_terms_for_eta1) | constant | `stabilis.stats.edof` | Below this many terms the sample autocorrelation is mostly noise and eta1 stops being informative -- it can even exceed M. Fall back to eta3, which is conservative by construction and cannot mislead in the optimistic direction. The threshold is deliberately generous; long tau is exactly where an over-narrow error bar does the most damage. |
 | [`MJD_EPOCH_UNIX`](core.md#mjd_epoch_unix) | constant | `stabilis.edit` | MJD 0 is 1858-11-17; the Unix epoch is MJD 40587. |
@@ -310,7 +312,7 @@ through a submodule path may move.
 | [`reject_outliers`](gui.md#reject_outliers) | function | `stabilis.gui.prepare` | `edit.drop_outliers` if a threshold was given, echoed if it ran. |
 | [`Rejection`](multi.md#rejection) **root** | class | `stabilis.multi.matrix` | One clock variance, from every pair of channels that watched it. |
 | [`replay`](stream.md#replay) | function | `stabilis.stream.source` | Replay an array as a timestamped stream on a perfect grid. |
-| [`Report`](validate.md#report) | class | `stabilis.validate.report` | The whole evidence run: every check, the environment, the digest. |
+| [`Report`](validate.md#report) | class | `stabilis.validate.check` | The whole evidence run: every check, the environment, the digest. |
 | [`residual_hat`](fitting.md#residual_hat) | function | `stabilis.fitting.uncertainty` | `H = Jr (Jr.T Jr)^-1 Jr.T`, the projector onto the fitted directions. |
 | [`residuals`](fitting.md#residuals) | function | `stabilis.fitting.objective` | Residual vector whose sum of squares is the objective. |
 | [`ROW`](export.md#row) | constant | `stabilis.export.stable32` | 75 characters, contiguous, no separators. Field ends at 5, 18, 27, 33, 46, 60, 75. |
@@ -328,6 +330,7 @@ through a submodule path may move.
 | [`SCHEMA_VERSION`](bench.md#schema_version) | constant | `stabilis.bench.model` | Bumped when the JSON layout changes in a way an older reader would misread. `store.load` refuses a version it does not know rather than guessing at the difference. |
 | [`script_l`](stats.md#script_l) **root** | function | `stabilis.stats.psd` | `L(f)` in dBc/Hz, and the mask of where the small-angle result holds. |
 | [`script_l`](plot.md#script_l) **root** | function | `stabilis.plot` | `L(f)` in dBc/Hz, drawn only where the small-angle result holds. |
+| [`SEEDS`](validate.md#seeds) | constant | `stabilis.validate.check` | Published so the Monte-Carlo tiers can be repeated by a third party. |
 | [`Segment`](core.md#segment) | class | `stabilis.mask` | One piece of a piecewise limit, over `tau_lo < tau <= tau_hi`. |
 | [`segments`](core.md#segments) | function | `stabilis.preprocess` | Half-open ``[start, stop)`` index ranges of contiguous finite runs. |
 | [`select_range`](core.md#select_range) **root** | function | `stabilis.edit` | The part of `series` from `start` to `stop`, and why. |
@@ -354,6 +357,8 @@ through a submodule path may move.
 | [`Spur`](stats.md#spur) **root** | class | `stabilis.stats.spur` | One tone, as measured rather than as binned. |
 | [`SpurTable`](stats.md#spurtable) **root** | class | `stabilis.stats.spur` | Every tone found, the floor they were found against, and the odds. |
 | [`StabilityResult`](stats.md#stabilityresult) **root** | class | `stabilis.stats.core` | A stability statistic evaluated over a grid of averaging factors. |
+| [`STABLE32_OUTPUTS`](validate.md#stable32_outputs) | constant | `stabilis.validate.interop` | Where the reference session's exports live, relative to this file. Absent from an installed wheel, which is fine -- the checks that read it say how many tables they found and pass vacuously on none, so a partially collected session is still worth running. |
+| [`STABLE32_PRINT_RTOL`](validate.md#stable32_print_rtol) | constant | `stabilis.validate.interop` | Stable32 exports five significant figures, so a value we compute at full precision can differ from the printed one by up to half an ulp of the fifth digit -- 5e-5 when the mantissa is near 1. Anything inside this is agreement to the last digit the export actually carries; asserting tighter would be asserting against digits Stable32 never wrote. |
 | [`Stable32Table`](validate.md#stable32table) | class | `stabilis.validate.stable32` | One (sigma type, tau mode) run, exactly as Stable32 printed it. |
 | [`Step`](core.md#step) **root** | class | `stabilis.provenance` | One recorded action. |
 | [`STEP_DIVISOR`](stream.md#step_divisor) | constant | `stabilis.stream.davar` | Default `step`, as a fraction of the window. Ten steps per window resolves an event to a tenth of the averaging span, which is as fine as the surface means anything: two windows overlapping by 90 % share 90 % of their terms and cannot disagree by much. |
@@ -383,6 +388,7 @@ through a submodule path may move.
 | [`theobr`](stats.md#theobr) **root** | function | `stabilis.stats.theoh` | Bias-removed Thêo1, SP 1065 eq. (33). |
 | [`theoh`](stats.md#theoh) **root** | function | `stabilis.stats.theoh` | ThêoH, SP 1065 eq. (34): AVAR at short tau, ThêoBR beyond it. |
 | [`tierms`](stats.md#tierms) **root** | function | `stabilis.stats.mtie` | RMS time interval error over intervals of length tau. |
+| [`TIERS`](validate.md#tiers) | constant | `stabilis.validate.check` |  |
 | [`TIME_COLUMNS`](io.md#time_columns) | constant | `stabilis.io.write` | "" is no time column at all: the rate lives in the header instead, which is both exact and smaller. The other three exist because some consumers want a timetag, and they are ranked here by how much of a picosecond they can still resolve -- see the warning in `_time_column`. |
 | [`timebase`](gui.md#timebase) | function | `stabilis.gui.files` | `(rate_hz, jitter, note)` from a time column, numeric or text. |
 | [`to_bounded`](fitting.md#to_bounded) | function | `stabilis.fitting.lm` | The inverse of `to_free`. |

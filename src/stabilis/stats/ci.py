@@ -26,8 +26,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dataclasses import replace
-
 import numpy as np
 
 from .._specfun import chi2_ppf

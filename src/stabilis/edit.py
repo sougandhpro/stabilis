@@ -29,8 +29,8 @@ from dataclasses import replace
 
 import numpy as np
 
-from .log import record, warn
-from .types import FreqSeries, PhaseSeries
+from .log import record
+from .types import PhaseSeries
 
 __all__ = ["BY", "select_range", "drop_outliers", "summary",
            "parse_expression", "combine", "MJD_EPOCH_UNIX"]

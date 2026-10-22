@@ -10,10 +10,17 @@ The exact-rational oracle and the evidence report.
 - **`stabilis.validate`** -- Validation as a deliverable: certified oracles and the evidence report.
 - **`stabilis.validate.certified`** -- Certified values by exact rational arithmetic.
   <br>`CERTIFIED_DIGITS`, `exact_phase_from_freq`, `exact_oavar`, `exact_avar`, `exact_mvar`, `exact_tvar`, `exact_ohvar`, `certified_deviation`, `lre`
+- **`stabilis.validate.check`** -- The record of one validation claim, and of a whole run.
+  <br>`TIERS`, `ESTIMATORS`, `SEEDS`, `MIN_COVERAGE_TRIALS`, `Check`, `Report`
+- **`stabilis.validate.coverage`** -- The coverage tier: do the error bars cover the truth as often as claimed.
 - **`stabilis.validate.expected`** -- Exact `E[sigma^2(tau)]` from the generator's impulse response.
   <br>`IMPULSE_TERMS`, `allan_kernel`, `wavelet_kernel`, `expected_variance`, `expected_avar`, `expected_wvar`
+- **`stabilis.validate.identity`** -- The identity and certified tiers: claims that hold exactly.
+- **`stabilis.validate.interop`** -- The interop tier: agreement with published tables and with Stable32.
+  <br>`STABLE32_OUTPUTS`, `STABLE32_PRINT_RTOL`
 - **`stabilis.validate.report`** -- `stabilis validate` -- validation as a deliverable, not just green CI.
-  <br>`Check`, `Report`, `run`, `to_json`, `to_html`
+  <br>`run`, `to_json`, `to_html`
+- **`stabilis.validate.roundtrip`** -- Coverage-tier round trips: plant a known truth, recover it.
 - **`stabilis.validate.stable32`** -- Reader for Stable32's exported statistics tables.
   <br>`SIGMA_TYPES`, `Stable32Table`, `parse`, `load_dir`
 
@@ -136,6 +143,97 @@ an explanation, is more credible evidence than a green light.
 
 Returns `float("inf")` when the values agree exactly, and 0.0 when the
 certified value is zero but the computed one is not.
+
+---
+
+## `stabilis.validate.check`
+
+The record of one validation claim, and of a whole run.
+
+Shared by every tier module; nothing here computes evidence.
+
+#### `TIERS`
+
+```python
+TIERS = ('identity', 'certified', 'coverage', 'interop', 'self-test')
+```
+
+#### `ESTIMATORS`
+
+```python
+ESTIMATORS = [('adev', adev, exact_avar), ('oadev', oadev, exact_oavar), ('mdev', mdev, exact_mvar), ('tdev', tdev, exact_tvar), ('ohdev', ohdev, exact_ohvar)]
+```
+
+#### `SEEDS`
+
+```python
+SEEDS = {'coverage': 22, 'gaps': 7, 'stream': 3}
+```
+
+Published so the Monte-Carlo tiers can be repeated by a third party.
+
+#### `MIN_COVERAGE_TRIALS`
+
+```python
+MIN_COVERAGE_TRIALS = 300
+```
+
+Coverage cannot be measured meaningfully with fewer than this many realizations -- the estimate's own standard error would swamp the effect being checked. A lower request is raised to this rather than producing a number that looks measured and is not.
+
+#### `Check`
+
+```python
+@dataclass(frozen=True)
+class Check
+```
+
+One assertion, with the tolerance it was made at and why.
+
+*Fields*
+
+```python
+tier: str
+name: str
+claim: str
+tolerance: str
+measured: str
+passed: bool
+```
+
+#### `Report`
+
+```python
+@dataclass(frozen=True)
+class Report
+```
+
+The whole evidence run: every check, the environment, the digest.
+
+*Fields*
+
+```python
+checks: tuple[Check, ...]
+environment: dict
+seeds: dict
+digest: str
+generated: str
+```
+
+*property* `passed(self) -> bool`
+
+*property* `failures(self) -> tuple[Check, ...]`
+
+*method* `by_tier(self, tier: str) -> tuple[Check, ...]`
+
+---
+
+## `stabilis.validate.coverage`
+
+The coverage tier: do the error bars cover the truth as often as claimed.
+
+Monte-Carlo, so every tolerance widens with the measurement's own standard
+error and trial counts below `MIN_COVERAGE_TRIALS` are raised rather than
+believed. `_coverage` is the tier's entry point and fixes its order.
 
 ---
 
@@ -272,6 +370,41 @@ double this to compare against a deviation.
 
 ---
 
+## `stabilis.validate.identity`
+
+The identity and certified tiers: claims that hold exactly.
+
+Analytic identities that must hold to rounding, and agreement with the
+exact-rational oracle in `certified.py`. No Monte-Carlo anywhere here, so
+every check in this module either holds or is a bug.
+
+---
+
+## `stabilis.validate.interop`
+
+The interop tier: agreement with published tables and with Stable32.
+
+INTEROP, not correctness -- every published ADEV table traces back to
+Stable32, so matching one proves interoperability and nothing more.
+
+#### `STABLE32_OUTPUTS`
+
+```python
+STABLE32_OUTPUTS = Path(__file__).resolve().parents[3] / 'tests' / 'data' / 'stable32'
+```
+
+Where the reference session's exports live, relative to this file. Absent from an installed wheel, which is fine -- the checks that read it say how many tables they found and pass vacuously on none, so a partially collected session is still worth running.
+
+#### `STABLE32_PRINT_RTOL`
+
+```python
+STABLE32_PRINT_RTOL = 0.0001
+```
+
+Stable32 exports five significant figures, so a value we compute at full precision can differ from the printed one by up to half an ulp of the fifth digit -- 5e-5 when the mantissa is near 1. Anything inside this is agreement to the last digit the export actually carries; asserting tighter would be asserting against digits Stable32 never wrote.
+
+---
+
 ## `stabilis.validate.report`
 
 `stabilis validate` -- validation as a deliverable, not just green CI.
@@ -301,50 +434,9 @@ What makes this evidence rather than decoration:
 
 See theory pages, and `references.md` for the epistemic caveat in full.
 
-#### `Check`
-
-```python
-@dataclass(frozen=True)
-class Check
-```
-
-One assertion, with the tolerance it was made at and why.
-
-*Fields*
-
-```python
-tier: str
-name: str
-claim: str
-tolerance: str
-measured: str
-passed: bool
-```
-
-#### `Report`
-
-```python
-@dataclass(frozen=True)
-class Report
-```
-
-The whole evidence run: every check, the environment, the digest.
-
-*Fields*
-
-```python
-checks: tuple[Check, ...]
-environment: dict
-seeds: dict
-digest: str
-generated: str
-```
-
-*property* `passed(self) -> bool`
-
-*property* `failures(self) -> tuple[Check, ...]`
-
-*method* `by_tier(self, tier: str) -> tuple[Check, ...]`
+This module assembles and renders. The checks live one module per tier:
+`identity.py` (identity and certified), `coverage.py` and `roundtrip.py`
+(coverage), `interop.py`; `check.py` holds the records they return.
 
 #### `run`
 
@@ -372,6 +464,17 @@ to_html(report: Report) -> str
 ```
 
 The report as a standalone HTML page, styles included.
+
+---
+
+## `stabilis.validate.roundtrip`
+
+Coverage-tier round trips: plant a known truth, recover it.
+
+The multi-channel checks (rejection gain, cross-variance, the bench hat),
+the power-law decomposition and its h_alpha scale, and the imputer against
+its paper's own criterion. Called from `coverage._coverage`, which fixes
+the order the report lists them in.
 
 ---
 

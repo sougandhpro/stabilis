@@ -83,7 +83,7 @@ from ..log import record, warn
 from ..provenance import Provenance
 from ..registry import get
 from ..stats.core import require_ordered_coeffs
-from ..stats.edof import DEFAULT_LAG_LIMIT, eta1, eta3
+from ..stats.edof import DEFAULT_LAG_LIMIT, eta3
 from ..stats.isserlis import isserlis_var, lagged_covariance
 from .align import common_support, overlap
 

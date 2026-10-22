@@ -34,7 +34,7 @@ import numpy as np
 from ..log import record, warn
 from ..provenance import Provenance
 from ..types import FreqSeries, PhaseSeries
-from .window import WINDOWS, enbw_bins, window
+from .window import WINDOWS, window
 
 __all__ = ["Spectrum", "KINDS", "DETRENDS", "SMALL_ANGLE_RAD2", "welch",
            "convert", "script_l", "discrete_integration_gain"]

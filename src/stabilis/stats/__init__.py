@@ -10,7 +10,7 @@ from .mtie import mtie, tierms
 from .theo1 import theo1
 from .theoh import theobr, theoh
 from .wavelet import wavelet_variance, wdev
-from .total import totdev, totvar_extend
+from .total import totdev
 from .mtotal import htotdev, mtotdev, total_subsequence_terms, ttotdev
 from .noiseid import NoiseID, identify, identify_curve
 from .powerlaw import PowerLawFit, decompose
