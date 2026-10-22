@@ -603,7 +603,12 @@ the one it actually has. M4's export layer has landed with it: the record
 back out as self-describing ASCII, the curve as CSV or JSON, the block
 Stable32 prints — reproduced character for character against its own
 committed exports — and a bundle directory whose digest covers the
-measurement rather than the files that carry it.</p>
+measurement rather than the files that carry it. M6 (streaming ingest and
+the dynamic Allan variance) and M7 (gap filling and the modified total
+family) are complete, and with them the Thêo family's error bar. Most
+recently, the data-conditioning steps the library had promised since M1 —
+drift removal and decimation — and a wavelet variance for gappy records
+that neither fills nor discards.</p>
 <div class="meta">
 generated {esc(now)} &nbsp;·&nbsp; stabilis {esc(stabilis.__version__)} &nbsp;·&nbsp;
 numpy {esc(np.__version__)} &nbsp;·&nbsp; python {esc(platform.python_version())}<br>
@@ -1260,6 +1265,29 @@ than a green tick. An extreme-value statistic is judged differently from a
 variance: exceeding an MTIE limit fails conclusively without an interval,
 while staying under one is a pass over the measured window only, since a
 longer record can only find a larger maximum.</li>
+<li><strong>M6, streaming and the dynamic Allan variance</strong> — sources
+from a replayed record, an appending file or a socket; an online Allan
+estimator; and DAVAR recomputed per window rather than slid, which makes the
+window-equals-record case an exact identity rather than a tolerance. Dropped
+samples stay as slots, so a late gap cannot re-time the record behind it.
+See <code>theory/stream.md</code> and <code>theory/davar.md</code>.</li>
+<li><strong>M7, gaps and the modified total family</strong> — Howe and
+Schlossberger's Total Imputer, implemented from the paper, with the filled
+samples excluded from the degrees of freedom so a filled record cannot buy a
+narrower error bar; MTOT, TTOT and HTOT, which carry no error bar because
+their terms are not one time-ordered sequence; and SP 1065 Table 9, the
+first confidence interval for the Thêo family.</li>
+<li><strong>Conditioning, and gaps without filling</strong> — drift removal
+by six models (phase quadratic, mean second difference and linear;
+frequency linear, bisection and mean), the fitted drift recorded in
+provenance, and decimation that keeps phase and frequency the same
+operation. Detrending is not free: the fitted trend absorbs low-frequency
+noise, and <code>theory/drift.md</code> measures how far into the curve that
+reaches for each noise type. Alongside it, Mondal and Percival's
+gap-tolerant wavelet variance, which averages each pair of filter taps over
+the times both were observed: equal to the ordinary estimator when nothing
+is missing, unbiased when something is, and it keeps the coarse scales
+that masking a gap throws away.</li>
 <li><strong>Spurs</strong> — found against a running-median floor, then
 <em>measured by fitting the record</em> rather than reading the spectrum, so
 a tone between bins is exact without a flat-top window: 0.001% on amplitude
@@ -1291,11 +1319,14 @@ is an instrument. <code>replay</code> drives the suite, <code>tail_file</code>
 is tested against a file written by the same process, and the sockets are
 tested on loopback. Item 10 of <code>VALIDATION-DEBT.md</code>; it closes with
 one appending text file from a real rig.</li>
-<li><strong>M4, M7 and the tail of M8</strong> — the rest of M4 is instrument
+<li><strong>Error bars the newest estimators lack</strong> — the gappy
+wavelet variance needs Mondal and Percival's multitaper interval, and the
+MTOT family needs Riley's published degrees of freedom. Both are declared in
+<code>VALIDATION-DEBT.md</code> rather than approximated.</li>
+<li><strong>M4 and the tail of M8</strong> — the rest of M4 is instrument
 readers, gated on paired vendor exports rather than on effort: a binary format
 with no public specification can only be accepted if the same capture is also
-available as vendor ASCII to check the reader against. M7's tail is the
-Howe–Schlossberger gap fill and the total-variance family. The rest of M8 is
+available as vendor ASCII to check the reader against. The rest of M8 is
 the interactive span selector and the remaining plots.</li>
 </ul>
 
