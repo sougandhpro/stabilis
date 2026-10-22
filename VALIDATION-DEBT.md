@@ -440,6 +440,31 @@ significant figures, which is structurally expected — HTOT applies to the
 frequency record the operator MTOT applies to the phase — and that identity
 is asserted in the tests, so the measured table is not free-floating.
 
+## 13. The gap-tolerant wavelet variance has no error bar
+
+**Status: open, waiting on an implementation choice the paper makes for
+us.**
+
+`gappy_wavelet_variance` (`stats/gappy.py`, `theory/gappy.md`) landed
+2026-10-22: Mondal & Percival's eqs. 8 and 9. The point estimate is
+checked three ways -- it is the MODWT estimator to 1e-11 with no gaps, it
+reproduces the paper's Table 1 truth row to its four printed decimals, and
+its ensemble mean lands within 4 standard errors of the exact expectation
+on AR(1), white FM and random-walk FM with 10 % of samples missing.
+
+**What is missing is the interval.** The paper's Theorem 3 gives the large
+sample variance `S_v(0)/M_j`, with `S_v(0)` estimated by a K = 5 multitaper
+spectrum of the per-time terms `Z_t` (eq. 11 with `beta_hat`). Two pieces
+are not here: the Slepian tapers (numpy has no tridiagonal eigensolver, so
+they need an inverse-iteration routine of their own), and `Z_t` itself,
+which costs O(L_j^2) per sample because `beta_hat` depends on the tap
+pair, not only its lag. The result therefore carries no coefficients and
+`confidence` refuses it. **Discharges** by implementing both and adding a
+Monte-Carlo coverage check of the resulting interval, as every other EDOF
+path here carries -- the paper's own Table 1 shows its multitaper standard
+error for `v` averaging 16-21 % below the true one, so coverage must be
+measured, not assumed.
+
 ---
 
 ## Not debt

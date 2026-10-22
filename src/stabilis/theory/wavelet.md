@@ -141,7 +141,9 @@ The price is steep at the coarse end and worth stating plainly: one bad
 sample in 2048 removes the coarsest `d4` scale outright, because the
 equivalent filter there is 1534 taps and every coefficient the boundary
 left covers the gap. That is the argument for the gap-filling milestone,
-not an argument for improvising an interpolation here.
+not an argument for improvising an interpolation here -- and for the
+imputation-free alternative, `gappy_wavelet_variance`, which keeps every
+observed pair instead of every clean coefficient (see `gappy`).
 
 ## Validation status
 
@@ -218,8 +220,6 @@ repository. MTIE is out permanently.
   degrees of freedom from an assumed or fitted spectrum instead, and are
   the better answer where the record is short and `eta1` has too few terms
   to read an autocorrelation from.
-* **Mondal & Percival's gap-tolerant estimator**, the imputation-free route
-  to a wavelet variance on gappy records.
 
 ## References
 

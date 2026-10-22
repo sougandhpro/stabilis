@@ -88,6 +88,7 @@ from .stats import (  # noqa: E402
     theobr,
     theoh,
     wdev,
+    gappy_wavelet_variance,
     welch,
     Spectrum,
     script_l,
@@ -149,6 +150,7 @@ __all__ = [
     "theobr",
     "theoh",
     "wdev",
+    "gappy_wavelet_variance",
     "StabilityResult",
     # spectra
     "welch",

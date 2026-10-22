@@ -947,7 +947,7 @@ usage: stabilis wdev [-h] [--kind {phase,frequency}] [--rate RATE] [--column COL
                      [--gap-value GAP_VALUE] [--filter {d4,d6,d8,haar}]
                      [--levels LEVELS] [--biased] [--confidence CONFIDENCE]
                      [--edof-method {auto,eta1,eta3,greenhall,totvar,theo1}]
-                     [--no-confidence] [--json]
+                     [--no-confidence] [--gappy] [--estimator {v,u}] [--json]
                      path
 
 positional arguments:
@@ -980,6 +980,11 @@ options:
   --edof-method {auto,eta1,eta3,greenhall,totvar,theo1}
                         degrees-of-freedom estimator; see `stabilis docs edof`
   --no-confidence       skip the bounds
+  --gappy               Mondal-Percival estimator: keep every observed pair instead of
+                        masking every coefficient a gap touches. No bounds yet; see
+                        `stabilis docs gappy`
+  --estimator {v,u}     with --gappy: v (semivariogram, eq. 9; needs only stationary
+                        increments) or u (covariance, eq. 8; stationary y only)
   --json                emit JSON
 ```
 

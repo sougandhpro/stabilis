@@ -10,6 +10,7 @@ from .mtie import mtie, tierms
 from .theo1 import theo1
 from .theoh import theobr, theoh
 from .wavelet import wavelet_variance, wdev
+from .gappy import gappy_wavelet_variance
 from .total import totdev
 from .mtotal import htotdev, mtotdev, total_subsequence_terms, ttotdev
 from .noiseid import NoiseID, identify, identify_curve
@@ -38,6 +39,7 @@ __all__ = [
     "theoh",
     "wdev",
     "wavelet_variance",
+    "gappy_wavelet_variance",
     "Confidence",
     "confidence",
     "ONE_SIGMA",

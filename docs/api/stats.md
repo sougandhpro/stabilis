@@ -18,6 +18,8 @@ The variance family, confidence intervals, noise identification, power spectra a
   <br>`GAP_POLICIES`, `Shape`, `StabilityResult`, `phase_runs`, `run_estimator`
 - **`stabilis.stats.edof`** -- Equivalent degrees of freedom, estimated from the data itself.
   <br>`EDOF_METHODS`, `DATA_DRIVEN_METHODS`, `MIN_TERMS_FOR_ETA1`, `eta1`, `eta3`, `edof`, `TOTVAR_EDOF_BC`, `totvar_edof`, `THEO1_EDF_NOISES`, `theo1_edof`
+- **`stabilis.stats.gappy`** -- The wavelet variance of a gappy record, without filling the gaps.
+  <br>`ESTIMATORS`, `MAX_PAIR_OPS`, `level_filter`, `gappy_wavelet_variance`
 - **`stabilis.stats.greenhall`** -- Greenhall EDOF -- degrees of freedom from an assumed power law.
   <br>`J_MAX`, `GREENHALL_ALPHAS`, `GREENHALL_ORDERS`, `GREENHALL_RUN_POLICIES`, `term_count`, `greenhall_edof_simple`, `greenhall_edof`, `greenhall_edof_pooled`
 - **`stabilis.stats.isserlis`** -- Fourth moments of Gaussian coefficient arrays, exactly.
@@ -53,7 +55,7 @@ The variance family, confidence intervals, noise identification, power spectra a
 
 Stability estimators.
 
-Re-exports: `Shape`, `StabilityResult`, `adev`, `oadev`, `mdev`, `tdev`, `ohdev`, `mtie`, `tierms`, `totdev`, `mtotdev`, `ttotdev`, `htotdev`, `total_subsequence_terms`, `theo1`, `theobr`, `theoh`, `wdev`, `wavelet_variance`, `Confidence`, `confidence`, `ONE_SIGMA`, `TWO_SIGMA`, `edof`, `eta1`, `eta3`, `greenhall_edof`, `greenhall_edof_pooled`, `NoiseID`, `identify`, `identify_curve`, `deviation_bias_factor`, `unbias_deviation`, `PowerLawFit`, `decompose`, `Spectrum`, `welch`, `script_l`, `Spur`, `SpurTable`, `detect_spurs`, `notch_spurs`, `sinusoid_dev`, `TauCovariance`, `tau_covariance`.
+Re-exports: `Shape`, `StabilityResult`, `adev`, `oadev`, `mdev`, `tdev`, `ohdev`, `mtie`, `tierms`, `totdev`, `mtotdev`, `ttotdev`, `htotdev`, `total_subsequence_terms`, `theo1`, `theobr`, `theoh`, `wdev`, `wavelet_variance`, `gappy_wavelet_variance`, `Confidence`, `confidence`, `ONE_SIGMA`, `TWO_SIGMA`, `edof`, `eta1`, `eta3`, `greenhall_edof`, `greenhall_edof_pooled`, `NoiseID`, `identify`, `identify_curve`, `deviation_bias_factor`, `unbias_deviation`, `PowerLawFit`, `decompose`, `Spectrum`, `welch`, `script_l`, `Spur`, `SpurTable`, `detect_spurs`, `notch_spurs`, `sinusoid_dev`, `TauCovariance`, `tau_covariance`.
 
 ---
 
@@ -783,6 +785,105 @@ the white-PM and flicker-PM rows have `nx - t` in a denominator: at the
 largest Thêo1 averaging factor `t` approaches `0.75(N-1)`, so for a
 short record the fit can return a negative or absurd number. One degree
 of freedom is the floor everywhere else here and it is the floor here.
+
+---
+
+## `stabilis.stats.gappy`
+
+The wavelet variance of a gappy record, without filling the gaps.
+
+Mondal & Percival, "Wavelet variance analysis for gappy time series",
+Ann. Inst. Stat. Math. 62 (2010) 943-966, eqs. 8 and 9. The imputation-free
+alternative to `impute.fill_gaps`: nothing is invented, and the estimator
+stays unbiased conditional on the gap pattern.
+
+`wavelet_variance` drops every MODWT coefficient whose filter touches a
+gap, which is unbiased too but throws away every coefficient within `L_j`
+of a gap. At deep levels `L_j` is thousands of samples, so a record with
+one gap per thousand loses most of its long-scale coefficients. The
+estimators here keep every observed *pair* instead. Expanding `W_t**2`
+into its pair products and averaging each pair over the times it is
+observed,
+
+    v = -(1/2) sum_{l,l'} h_l h_l' * mean_t[ (y_{t-l} - y_{t-l'})**2 ]   (9)
+    u =        sum_{l,l'} h_l h_l' * mean_t[  y_{t-l} * y_{t-l'}      ]   (8)
+
+each mean running over `t = L_j-1 .. N-1` where both samples exist. That
+is the paper's `beta_hat_{l,l'}` weighting written as a mean: its
+`1/beta_hat` is the observed fraction of that window, `C/M_j`. With no
+gaps every mean is over all `M_j` times and both collapse to the MODWT
+estimator `mean(W_t**2)` -- a test holds them to it.
+
+`v` is the default. It is the semivariogram form, so it needs only
+stationary *increments* and is blind to a constant offset; `u` needs `y`
+itself stationary and is centred on its observed mean first, which the
+paper's Remark 1 asks for. Both can come out negative on a short or very
+gappy record. A negative variance is reported, not clipped: clipping would
+bias the estimator the paper proves unbiased.
+
+**The cost is per lag, not per pair.** For a lag `k = l' - l` the pair
+products form one sequence `g_k[s]` regardless of `l`; a level's window
+over `t` is then a window over `s = t - l`, read off one cumulative sum in
+O(1). A level costs O(L_j * N), the same as its convolution, rather than
+O(L_j**2 * N).
+
+**No confidence interval yet.** The paper's interval needs a multitaper
+estimate of the spectrum of the per-time terms `Z_t` at zero frequency,
+and forming `Z_t` costs O(L_j**2) per sample because `beta_hat` depends on
+the pair. Declared in `VALIDATION-DEBT.md`; see `theory/gappy.md`.
+
+#### `ESTIMATORS`
+
+```python
+ESTIMATORS = ('v', 'u')
+```
+
+#### `MAX_PAIR_OPS`
+
+```python
+MAX_PAIR_OPS = 4000000000.0
+```
+
+Element operations a call may cost: about L_j * N per level. 4e9 is tens of seconds of numpy; beyond it, ask for fewer levels rather than hang.
+
+#### `level_filter`
+
+```python
+level_filter(name: str, level: int) -> np.ndarray
+```
+
+The level-`j` MODWT wavelet filter `h_{j,l}`, `l = 0 .. L_j-1`.
+
+    L_j = (2^j - 1)(L - 1) + 1,     sum_l h_{j,l}**2 = 2^-j
+
+Read off the transform itself: `modwt` applied to a unit impulse
+returns `W_j[t] = h_{j,t}`. Taken this way rather than by a separate
+cascade so that the filter this estimator uses is, by construction, the
+one `wavelet_variance` uses. `validate.expected.wavelet_kernel` builds
+it the other way, and a test holds the two equal.
+
+#### `gappy_wavelet_variance`
+
+```python
+gappy_wavelet_variance(series, name: str='haar', levels: int | None=None, estimator: str='v') -> StabilityResult
+```
+
+Wavelet variance by scale for a record with gaps, eq. 9 (or 8).
+
+    v_j = -(1/2) sum_{l,l'} h_{j,l} h_{j,l'} beta_hat_{l,l'}
+                 * (1/M_j) sum_t (y_{t-l} - y_{t-l'})**2 d_{t-l} d_{t-l'}
+    beta_hat_{l,l'} = M_j / sum_t d_{t-l} d_{t-l'},   M_j = N - L_j + 1
+
+`d` is 1 where `y` was observed and 0 at a gap; `t` runs from `L_j - 1`
+to `N - 1`. Same scale and units as `wavelet_variance` -- fractional
+frequency, `tau_j = 2^{j-1} tau0`, Haar giving `avar = 2 * nu^2` -- and
+equal to it to rounding when there are no gaps.
+
+A level is dropped, and the drop recorded, when some pair of taps is
+never observed together inside the window: `beta_hat` is then
+undefined, which is the paper's own assumption failing rather than a
+numerical accident. Carries no coefficients, so `confidence` refuses
+it; see the module docstring.
 
 ---
 

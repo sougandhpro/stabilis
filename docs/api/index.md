@@ -126,6 +126,7 @@ through a submodule path may move.
 | [`EDOF_METHODS`](stats.md#edof_methods) | constant | `stabilis.stats.edof` | "greenhall" is dispatched by stats.ci, not here: it is a function of the noise type and the record geometry rather than of the coefficients, so it shares none of this module's inputs. It is listed here because this tuple is the single source of truth for what a caller -- and the CLI -- may ask for. `auto` deliberately never resolves to it; see the module docstring. "totvar" and "greenhall" both assume a power law; neither is ever chosen by "auto", because staying noise-type-free is the point. |
 | [`enbw_bins`](stats.md#enbw_bins) | function | `stabilis.stats.window` | Noise-equivalent bandwidth in DFT bins. |
 | [`envelope`](gui.md#envelope) | function | `stabilis.gui.prepare` | The `[start, stop)` slice reduced to one min/max pair per pixel column. |
+| [`ESTIMATORS`](stats.md#estimators) | constant | `stabilis.stats.gappy` |  |
 | [`ESTIMATORS`](validate.md#estimators) | constant | `stabilis.validate.check` |  |
 | [`estimators`](gui.md#estimators) | function | `stabilis.gui.api` | Every estimator the library has registered, in name order. |
 | [`eta1`](stats.md#eta1) | function | `stabilis.stats.edof` | Data-driven EDOF from the coefficient autocorrelation. |
@@ -164,6 +165,7 @@ through a submodule path may move.
 | [`frequency`](plot.md#frequency) | function | `stabilis.plot` | Fractional frequency against time. |
 | [`from_dict`](bench.md#from_dict) | function | `stabilis.bench.store` | Rebuild a bench, refusing a schema this reader does not know. |
 | [`GAP_POLICIES`](stats.md#gap_policies) | constant | `stabilis.stats.core` | How a gap is allowed to affect the terms around it.  "mask"    -- keep the record whole; terms whose window touches a gap come back non-finite and are dropped. This assumes the timescale ran continuously across the gap, so the phase on either side is on one common origin. True for a dropped sample on a known grid; false after a counter reset. "segment" -- analyse each contiguous run on its own origin and pool the coefficients. Costs only the 2m (or 3m) terms spanning the gap. Required for frequency input, and correct for phase whose origin may have moved. "auto"    -- "segment" for frequency, "mask" for phase. |
+| [`gappy_wavelet_variance`](stats.md#gappy_wavelet_variance) **root** | function | `stabilis.stats.gappy` | Wavelet variance by scale for a record with gaps, eq. 9 (or 8). |
 | [`GAUSS_MARKOV`](fitting.md#gauss_markov) | constant | `stabilis.fitting.models` |  |
 | [`get`](core.md#get) | function | `stabilis.registry` | Look up a registered callable, loading third-party plugins first. |
 | [`get_logger`](core.md#get_logger) | function | `stabilis.log` | Logger for a submodule. `get_logger("stats.classical")`. |
@@ -200,6 +202,7 @@ through a submodule path may move.
 | [`labels_for`](gui.md#labels_for) | function | `stabilis.gui.request` | The column names to resolve expressions against. |
 | [`lag1_alpha`](stats.md#lag1_alpha) | function | `stabilis.stats.noiseid` | Noise exponent from the lag-1 autocorrelation of *frequency* data. |
 | [`lagged_covariance`](stats.md#lagged_covariance) | function | `stabilis.stats.isserlis` | `R[i, j, k]`, the biased sample cross-covariance at lags 0..kmax. |
+| [`level_filter`](stats.md#level_filter) | function | `stabilis.stats.gappy` | The level-`j` MODWT wavelet filter `h_{j,l}`, `l = 0 .. L_j-1`. |
 | [`levenberg_marquardt`](fitting.md#levenberg_marquardt) | function | `stabilis.fitting.lm` | Minimize `sum(residual_fn(z)**2)` over the unconstrained vector `z`. |
 | [`limit_at`](core.md#limit_at) | function | `stabilis.mask` | The limit at `tau`, or None where the mask does not reach. |
 | [`list_topics`](core.md#list_topics) | function | `stabilis.docs` | Topic names, without the .md suffix, sorted. |
@@ -224,6 +227,7 @@ through a submodule path may move.
 | [`MAX_COLUMNS`](io.md#max_columns) | constant | `stabilis.io.text` |  |
 | [`MAX_GAP_SAMPLES`](stream.md#max_gap_samples) | constant | `stabilis.stream.collect` | Longest run of missing samples that will be materialized as NaN. |
 | [`MAX_GRID_OFFSET_SAMPLES`](multi.md#max_grid_offset_samples) | constant | `stabilis.multi.align` | How far an epoch may sit off the common grid, in samples. This is a float64 slop allowance and nothing more: an MJD-scale epoch resolves to about 6e-7 s, so exact equality is unattainable while 1e-3 of a sample is unreachable by any real misalignment. Anything larger is a genuine sub-sample offset, which no crop can fix. |
+| [`MAX_PAIR_OPS`](stats.md#max_pair_ops) | constant | `stabilis.stats.gappy` | Element operations a call may cost: about L_j * N per level. 4e9 is tens of seconds of numpy; beyond it, ask for fewer levels rather than hang. |
 | [`MAX_RING_BYTES`](stream.md#max_ring_bytes) | constant | `stabilis.stream.online` | Ceiling on the phase history one accumulator may hold. The ring is `2*max(af)+1` float64, so this is a direct bound on the largest averaging factor a stream may track -- about 16 million at the default. It is a memory bound rather than a preference, and it is stated because the alternative is a process killed by the allocator, which is not an error the code gets to report. |
 | [`MAX_SLIP_SAMPLES`](multi.md#max_slip_samples) | constant | `stabilis.multi.align` | How far the records may drift apart over the cropped window, in samples, before the rates count as different. Half a sample is the point at which a term in one record is nearer a *neighbouring* term in the other than to its own partner, so the pairing itself has become wrong rather than merely imprecise. |
 | [`MAX_TAUS`](core.md#max_taus) | constant | `stabilis.tau` | Hard ceiling on how many averaging factors any grid may produce.  **This is a memory bound, not a taste one.** Each averaging factor keeps a coefficient array of order `n` for the confidence-interval path, so the cost is `n_taus * n`. An unbounded `all` grid on a 200 000-point record asks for 50 000 factors and 60 GB, and the process is killed rather than slowed; at a million points it is 1500 GB. Nothing warns, because running out of memory is not an error the code gets to report. |

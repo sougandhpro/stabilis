@@ -320,7 +320,9 @@ def confidence(
         if len(result.coeffs) != result.af.size:
             raise ValueError(
                 f"{result.kind}: confidence needs the coefficient arrays; "
-                "the estimator was called with keep_coeffs=False"
+                "the estimator was called with keep_coeffs=False, or "
+                "produces none (gappy_wavelet_variance does not yet; see "
+                "theory/gappy.md)"
             )
         require_ordered_coeffs(result, "the confidence interval")
 

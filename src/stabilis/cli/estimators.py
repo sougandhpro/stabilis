@@ -132,6 +132,17 @@ def add_wdev(sub) -> None:
     )
     p_w.add_argument(
         "--no-confidence", action="store_true", help="skip the bounds")
+    p_w.add_argument(
+        "--gappy", action="store_true",
+        help="Mondal-Percival estimator: keep every observed pair instead of "
+             "masking every coefficient a gap touches. No bounds yet; see "
+             "`stabilis docs gappy`",
+    )
+    p_w.add_argument(
+        "--estimator", default="v", choices=("v", "u"),
+        help="with --gappy: v (semivariogram, eq. 9; needs only stationary "
+             "increments) or u (covariance, eq. 8; stationary y only)",
+    )
     p_w.add_argument("--json", action="store_true", help="emit JSON")
     p_w.set_defaults(func=_cmd_wdev, estimator_name="wdev",
                      alpha=None, run_policy="pool")
@@ -236,6 +247,8 @@ def _cmd_wdev(args) -> int:
     from ..stats.wavelet import FILTERS, wdev
 
     series = _load(args)
+    if args.gappy:
+        return _cmd_wdev_gappy(args, series)
     want_ci = not args.no_confidence
     result = wdev(series, name=args.filter, levels=args.levels,
                   unbiased=not args.biased, keep_coeffs=want_ci)
@@ -247,3 +260,27 @@ def _cmd_wdev(args) -> int:
         header += (f"\n# {series.n_gaps} gaps masked "
                    f"{step['coefficients_masked']} coefficients")
     return _print_result(args, result, ci, header)
+
+
+def _cmd_wdev_gappy(args, series) -> int:
+    """`wdev --gappy`: the same table, by Mondal & Percival, no bounds."""
+    from dataclasses import replace
+
+    from ..stats.gappy import gappy_wavelet_variance
+
+    if args.biased:
+        print("stabilis: --biased has no meaning with --gappy, whose "
+              "estimator uses only times where the filter is inside the "
+              "record.")
+        return 1
+    result = gappy_wavelet_variance(series, name=args.filter,
+                                    levels=args.levels,
+                                    estimator=args.estimator)
+    # On the Allan scale, like every other `wdev` row.
+    result = replace(result, var=result.var * 2.0,
+                     kind=f"wdev_gappy[{args.filter}]")
+    header = (f"# filter: {args.filter}, Mondal-Percival estimator "
+              f"{args.estimator}   n = {series.n}   {series.n_gaps} gaps   "
+              f"rate = {series.rate_hz:g} Hz\n# no confidence bounds: see "
+              "`stabilis docs gappy`")
+    return _print_result(args, result, None, header)
