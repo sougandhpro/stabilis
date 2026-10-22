@@ -13,6 +13,8 @@ The library API is documented separately, in [api/index.md](api/index.md).
 | [`stabilis docs`](#stabilis-docs) | read the theory pages |
 | [`stabilis validate`](#stabilis-validate) | run the validation evidence report |
 | [`stabilis stats`](#stabilis-stats) | basic statistics for a data file |
+| [`stabilis drift`](#stabilis-drift) | Fit a deterministic trend to a phase or frequency record. |
+| [`stabilis decimate`](#stabilis-decimate) | Resample to `m * tau0`, the way each kind of data must be. |
 | [`stabilis impute`](#stabilis-impute) | Fill every gap in a frequency record, and say which samples were made up. |
 | [`stabilis adev`](#stabilis-adev) | Non-overlapping Allan deviation. See theory/avar.md. |
 | [`stabilis oadev`](#stabilis-oadev) | Overlapping Allan deviation. See theory/avar.md. |
@@ -57,16 +59,18 @@ The library API is documented separately, in [api/index.md](api/index.md).
 
 ```
 usage: stabilis [-h] [--version] [--log-level {debug,info,warning,error}]
-                {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,mtotdev,ttotdev,htotdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
+                {docs,validate,stats,drift,decimate,impute,adev,oadev,mdev,tdev,ohdev,totdev,mtotdev,ttotdev,htotdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
                 ...
 
 Frequency stability analysis.
 
 positional arguments:
-  {docs,validate,stats,impute,adev,oadev,mdev,tdev,ohdev,totdev,mtotdev,ttotdev,htotdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
+  {docs,validate,stats,drift,decimate,impute,adev,oadev,mdev,tdev,ohdev,totdev,mtotdev,ttotdev,htotdev,theo1,theobr,theoh,mtie,tierms,wdev,compare-edof,powerlaw,fit,cross,reject,plot,report,gui,spur,mask,psd,davar,stream,export,bench}
     docs                read the theory pages
     validate            run the validation evidence report
     stats               basic statistics for a data file
+    drift               Fit a deterministic trend to a phase or frequency record.
+    decimate            Resample to `m * tau0`, the way each kind of data must be.
     impute              Fill every gap in a frequency record, and say which samples
                         were made up.
     adev                Non-overlapping Allan deviation. See theory/avar.md.
@@ -172,6 +176,75 @@ options:
                         override delimiter sniffing
   --gap-value GAP_VALUE
                         value marking a gap (Stable32 writes 0; not assumed)
+  --json                emit JSON
+```
+
+## `stabilis drift`
+
+Fit a deterministic trend to a phase or frequency record..
+
+```
+usage: stabilis drift [-h] [--kind {phase,frequency}] [--rate RATE] [--column COLUMN]
+                      [--time-column TIME_COLUMN] [--delimiter DELIMITER]
+                      [--gap-value GAP_VALUE]
+                      [--model {bisection,diff2,linear,mean,quadratic}] [--out OUT]
+                      [--digits DIGITS] [--json]
+                      path
+
+positional arguments:
+  path                  input data file
+
+options:
+  -h, --help            show this help message and exit
+  --kind {phase,frequency}
+                        whether the column holds phase in seconds or fractional
+                        frequency
+  --rate RATE           sample rate in Hz
+  --column COLUMN       data column, 0-based
+  --time-column TIME_COLUMN
+                        timetag column, to infer --rate
+  --delimiter DELIMITER
+                        override delimiter sniffing
+  --gap-value GAP_VALUE
+                        value marking a gap (Stable32 writes 0; not assumed)
+  --model {bisection,diff2,linear,mean,quadratic}
+                        default: quadratic for phase, linear for frequency
+  --out OUT             write the conditioned record here
+  --digits DIGITS       significant digits in --out (default: 17, round-trip)
+  --json                emit JSON
+```
+
+## `stabilis decimate`
+
+Resample to `m * tau0`, the way each kind of data must be..
+
+```
+usage: stabilis decimate [-h] [--kind {phase,frequency}] [--rate RATE]
+                         [--column COLUMN] [--time-column TIME_COLUMN]
+                         [--delimiter DELIMITER] [--gap-value GAP_VALUE] --factor
+                         FACTOR [--out OUT] [--digits DIGITS] [--json]
+                         path
+
+positional arguments:
+  path                  input data file
+
+options:
+  -h, --help            show this help message and exit
+  --kind {phase,frequency}
+                        whether the column holds phase in seconds or fractional
+                        frequency
+  --rate RATE           sample rate in Hz
+  --column COLUMN       data column, 0-based
+  --time-column TIME_COLUMN
+                        timetag column, to infer --rate
+  --delimiter DELIMITER
+                        override delimiter sniffing
+  --gap-value GAP_VALUE
+                        value marking a gap (Stable32 writes 0; not assumed)
+  --factor FACTOR, -m FACTOR
+                        averaging factor m; the new tau0 is m * tau0
+  --out OUT             write the conditioned record here
+  --digits DIGITS       significant digits in --out (default: 17, round-trip)
   --json                emit JSON
 ```
 

@@ -19,8 +19,8 @@ Series types, provenance, the tau grid, editing and synthesis -- everything that
   <br>`VERDICTS`, `Segment`, `Mask`, `MaskCheck`, `MaskResult`, `limit_at`, `evaluate`, `available`, `CATALOG`
 - **`stabilis.powerlaw_coeffs`** -- Power-law conversion coefficients: `sigma2_y(tau)` from `S_y(f) = h_a f^a`.
   <br>`ALPHAS`, `FH_DEPENDENT`, `MIN_FH_TAU_PRODUCT`, `MVAR_FLICKER_FM_COEFF`, `avar_coeff`, `mvar_coeff`, `drift_coeff`
-- **`stabilis.preprocess`** -- Data conditioning: descriptive statistics and gap segmentation.
-  <br>`basic_stats`, `segments`, `longest_segment`
+- **`stabilis.preprocess`** -- Data conditioning: descriptive statistics, gap segmentation, drift
+  <br>`DRIFT_MODELS`, `basic_stats`, `segments`, `longest_segment`, `DriftFit`, `fit_drift`, `remove_drift`, `decimate`
 - **`stabilis.provenance`** -- Provenance: what the tool did, and what it decided on your behalf.
   <br>`utc_now`, `Step`, `Provenance`, `new_provenance`, `add_step`, `file_sha256`, `to_dict`, `to_json`
 - **`stabilis.reference`** -- Published reference datasets, as generators rather than data files.
@@ -676,9 +676,22 @@ is why drift enters the fit as `D**2` and keeps the model linear.
 
 ## `stabilis.preprocess`
 
-Data conditioning: descriptive statistics and gap segmentation.
+Data conditioning: descriptive statistics, gap segmentation, drift
+removal and decimation.
 
-Grows in M1 with drift removal, outlier handling and decimation.
+Outlier handling lives in `edit.py`, because removing a point is an
+exclusion and carries a stated reason. What is here changes no sample's
+status: a drift is subtracted from every point, and decimation keeps the
+timebase honest by changing `rate_hz`. Both are recorded in provenance with
+the numbers they used. See `theory/drift.md`.
+
+#### `DRIFT_MODELS`
+
+```python
+DRIFT_MODELS = {'phase': ('quadratic', 'diff2', 'linear'), 'frequency': ('linear', 'bisection', 'mean')}
+```
+
+Which drift models apply to which kind of data. Each fits the trend it names; `drift_per_s` is always the fractional frequency drift D in 1/s.
 
 #### `basic_stats`
 
@@ -717,6 +730,103 @@ longest_segment(a: np.ndarray) -> tuple[int, int]
 ```
 
 The longest contiguous finite run, as ``[start, stop)``.
+
+#### `DriftFit`
+
+```python
+@dataclass(frozen=True)
+class DriftFit
+```
+
+A fitted deterministic trend, and the drift rate it implies.
+
+`trend` has the length of the series it was fitted to and no gaps: it
+is what `remove_drift` subtracts. `drift_per_s` is D, the linear
+fractional-frequency drift, in 1/s (`drift_per_day` is D * 86400); it is
+0.0 for the two models that fit no drift (`linear` phase, `mean`
+frequency).
+
+There is deliberately no standard error on D. The least-squares one
+assumes white residuals, and a clock's residuals are not white: under
+random-walk FM it is too small by a factor that grows with the record.
+
+*Fields*
+
+```python
+model: str
+kind: str
+drift_per_s: float
+trend: np.ndarray
+provenance: Provenance
+```
+
+*property* `drift_per_day(self) -> float`
+
+#### `fit_drift`
+
+```python
+fit_drift(series, model: str | None=None) -> DriftFit
+```
+
+Fit a deterministic trend to a phase or frequency record.
+
+Phase models (`x` in seconds, `t[i] = i * tau0`):
+
+    quadratic   x ~ a + b*t + (D/2)*t**2       least squares
+    diff2       D = mean(x[i+2] - 2*x[i+1] + x[i]) / tau0**2,
+                trend = (D/2)*t**2
+    linear      x ~ a + b*t                    (frequency offset; D = 0)
+
+Frequency models (`y` dimensionless):
+
+    linear      y ~ a + D*t                    least squares
+    bisection   D = (ybar2 - ybar1) / (tbar2 - tbar1), the two halves
+                of the record (an odd last sample sits in neither);
+                trend = ybar1 + D*(t - tbar1)
+    mean        y ~ a                          (offset only; D = 0)
+
+Defaults: `quadratic` for phase, `linear` for frequency. Gaps (NaN) are
+left out of the fit and every mean; each finite sample keeps its true
+time, so a gapped record is fitted correctly rather than closed up.
+`diff2` and `bisection` are Stable32's robust alternatives: they cost
+efficiency on white noise and are less pulled by the ends of a
+random-walk record.
+
+#### `remove_drift`
+
+```python
+remove_drift(series, model: str | None=None)
+```
+
+`series` minus its fitted trend, with the fit in its provenance.
+
+    x_out = x - trend     (phase)        y_out = y - trend   (frequency)
+
+Gaps stay gaps. A fitted trend absorbs some of the noise as well as the
+drift, so the variance at the longest tau comes out biased low after
+removal -- the cost the Hadamard variance exists to avoid. See
+`theory/drift.md`.
+
+#### `decimate`
+
+```python
+decimate(series, m: int)
+```
+
+Resample to `m * tau0`, the way each kind of data must be.
+
+    phase:      x_out[k] = x[k*m]
+    frequency:  y_out[k] = mean(y[k*m : (k+1)*m])
+
+These are the same operation: the phase of the averaged frequency is
+the decimated phase. A trailing partial block is dropped, never
+averaged short -- a shorter average is a sample at a different tau. A
+frequency block containing a gap becomes a gap for the same reason. A
+phase gap survives only if it falls on a kept sample, because phase at
+the kept instants is all the decimated record claims to know.
+
+Epoch is unchanged: the first output sample starts where the first
+input sample did.
 
 ---
 

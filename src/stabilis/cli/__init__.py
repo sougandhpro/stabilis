@@ -24,7 +24,7 @@ from .mask import add_mask
 from .multi import add_cross, add_reject
 from .plot import add_plot
 from .powerlaw import add_powerlaw
-from .preprocess import add_stats
+from .preprocess import add_decimate, add_drift, add_stats
 from .psd import add_psd
 from .report import add_report
 from .spur import add_spur
@@ -51,6 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_docs(sub)
     add_validate(sub)
     add_stats(sub)
+    add_drift(sub)
+    add_decimate(sub)
     add_impute(sub)
     add_estimators(sub)
     add_wdev(sub)

@@ -63,7 +63,7 @@ from .io import (  # noqa: E402
 )
 from .edit import drop_outliers, select_range, summary  # noqa: E402
 from .impute import fill_gaps, live_terms  # noqa: E402
-from .preprocess import basic_stats  # noqa: E402
+from .preprocess import basic_stats, decimate, fit_drift, remove_drift  # noqa: E402
 from .stats import (  # noqa: E402
     ONE_SIGMA,
     TWO_SIGMA,
@@ -125,6 +125,9 @@ __all__ = [
     "WrittenFile",
     "basic_stats",
     # preparation
+    "fit_drift",
+    "remove_drift",
+    "decimate",
     "select_range",
     "drop_outliers",
     "summary",

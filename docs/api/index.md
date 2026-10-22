@@ -100,6 +100,7 @@ through a submodule path may move.
 | [`davar`](stream.md#davar) | function | `stabilis.stream.davar` | Evaluate `kind` over sliding windows of `window` samples. |
 | [`davar`](plot.md#davar) | function | `stabilis.plot` | The dynamic stability surface as a waterfall: time across, tau up. |
 | [`DavarSurface`](stream.md#davarsurface) | class | `stabilis.stream.davar` | σ²(τ, t) on a rectangular grid of averaging factors and window times. |
+| [`decimate`](core.md#decimate) **root** | function | `stabilis.preprocess` | Resample to `m * tau0`, the way each kind of data must be. |
 | [`decompose`](stats.md#decompose) **root** | function | `stabilis.stats.powerlaw` | Fit `h_alpha` and drift to one or more measured stability curves. |
 | [`DEFAULT_BOOTSTRAP`](fitting.md#default_bootstrap) | constant | `stabilis.fitting.core` | Draws when a bootstrap is asked for without a count. 200 gives a percentile interval whose own edges are stable to a few percent, which is finer than the interval is meaningful to. |
 | [`DEFAULT_MAX_AF_DIVISOR`](core.md#default_max_af_divisor) | constant | `stabilis.tau` | Default policy: m <= n/4. Beyond roughly this point an overlapping estimator has very few independent terms and the confidence interval is wider than the value is informative. Callers can override, and every estimator additionally clamps to its own hard mathematical limit. |
@@ -117,6 +118,8 @@ through a submodule path may move.
 | [`discrete_integration_gain`](stats.md#discrete_integration_gain) | function | `stabilis.stats.psd` | How much a cumulative sum exceeds an ideal integrator, by frequency. |
 | [`DRIFT`](fitting.md#drift) | constant | `stabilis.fitting.models` |  |
 | [`drift_coeff`](core.md#drift_coeff) | function | `stabilis.powerlaw_coeffs` | Coefficient of `D**2` in `sigma2_y(tau)` for linear frequency drift. |
+| [`DRIFT_MODELS`](core.md#drift_models) | constant | `stabilis.preprocess` | Which drift models apply to which kind of data. Each fits the trend it names; `drift_per_s` is always the fractional frequency drift D in 1/s. |
+| [`DriftFit`](core.md#driftfit) | class | `stabilis.preprocess` | A fitted deterministic trend, and the drift rate it implies. |
 | [`drop_outliers`](core.md#drop_outliers) **root** | function | `stabilis.edit` | Mark points further than `threshold` robust sigmas from the median. |
 | [`dtheta_dz`](fitting.md#dtheta_dz) | function | `stabilis.fitting.lm` | Derivative of `to_bounded`, for the delta method. |
 | [`edof`](stats.md#edof) | function | `stabilis.stats.edof` | EDOF and the method actually used, which are not always the requested one. |
@@ -151,6 +154,7 @@ through a submodule path may move.
 | [`FILTER_EFOLD`](core.md#filter_efold) | constant | `stabilis.impute` | The `2**3` of the paper's eq. 3, as an e-folding in cycles per sample. See `_lowpass` for why it is a pure number here and not a function of tau0. |
 | [`FILTERS`](stats.md#filters) | constant | `stabilis.stats.wavelet` | Filter families by name, keyed to the number of vanishing moments K. The length is 2K, so Haar is the two-tap K=1 case. |
 | [`fit`](fitting.md#fit) **root** | function | `stabilis.fitting.core` | Fit `model` to the sigma-tau curve in `result`. |
+| [`fit_drift`](core.md#fit_drift) **root** | function | `stabilis.preprocess` | Fit a deterministic trend to a phase or frequency record. |
 | [`FitResult`](fitting.md#fitresult) **root** | class | `stabilis.fitting.core` | Fitted parameters, two accounts of how well they are known, and why. |
 | [`floats`](gui.md#floats) | function | `stabilis.gui.request` | A float array as JSON, with every non-finite value as `null`. |
 | [`FORMATS`](io.md#formats) | constant | `stabilis.io.timebase` |  |
@@ -311,6 +315,7 @@ through a submodule path may move.
 | [`reject`](multi.md#reject) **root** | function | `stabilis.multi.matrix` | Average every pair's cross-variance, and say how deep that reached. |
 | [`reject_outliers`](gui.md#reject_outliers) | function | `stabilis.gui.prepare` | `edit.drop_outliers` if a threshold was given, echoed if it ran. |
 | [`Rejection`](multi.md#rejection) **root** | class | `stabilis.multi.matrix` | One clock variance, from every pair of channels that watched it. |
+| [`remove_drift`](core.md#remove_drift) **root** | function | `stabilis.preprocess` | `series` minus its fitted trend, with the fit in its provenance. |
 | [`replay`](stream.md#replay) | function | `stabilis.stream.source` | Replay an array as a timestamped stream on a perfect grid. |
 | [`Report`](validate.md#report) | class | `stabilis.validate.check` | The whole evidence run: every check, the environment, the digest. |
 | [`residual_hat`](fitting.md#residual_hat) | function | `stabilis.fitting.uncertainty` | `H = Jr (Jr.T Jr)^-1 Jr.T`, the projector onto the fitted directions. |
